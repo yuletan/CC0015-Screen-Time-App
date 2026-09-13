@@ -13,6 +13,7 @@ import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.graphics.toColorInt
+import com.intent.screentime.data.intent.Reasons
 import kotlin.math.roundToInt
 
 /**
@@ -58,7 +59,7 @@ class IntentOverlay(private val context: Context) {
 
     fun show(
         appLabel: String,
-        onAnswer: (String) -> Unit,
+        onAnswer: (Reasons.Option) -> Unit,
         onTimeoutAnswer: () -> Unit,
     ) {
         if (root != null) return
@@ -99,21 +100,17 @@ class IntentOverlay(private val context: Context) {
             ).apply { setPadding(0, dp(6), 0, dp(14)) },
         )
 
-        val options = listOf(
-            "Replying to someone",
-            "Checking something",
-            "Scrolling",
-            "Killing time",
-        )
-        options.chunked(2).forEachIndexed { index, rowOptions ->
+        // The chips come from the shared vocabulary rather than a local list, so the text
+        // on a pill and the row it later becomes in the ledger can never drift apart.
+        Reasons.OPTIONS.chunked(2).forEachIndexed { index, rowOptions ->
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 if (index > 0) setPadding(0, dp(8), 0, 0)
             }
-            rowOptions.forEach { label ->
+            rowOptions.forEach { option ->
                 row.addView(
                     textView(
-                        text = label,
+                        text = option.label,
                         size = 13f,
                         color = textColor,
                         bold = true,
@@ -126,10 +123,10 @@ class IntentOverlay(private val context: Context) {
                         isClickable = true
                         setPadding(dp(12), dp(12), dp(12), dp(12))
                         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                            .apply { if (label != rowOptions.last()) rightMargin = dp(8) }
+                            .apply { if (option != rowOptions.last()) rightMargin = dp(8) }
                         setOnClickListener {
                             hide()
-                            onAnswer(label)
+                            onAnswer(option)
                         }
                     },
                 )
