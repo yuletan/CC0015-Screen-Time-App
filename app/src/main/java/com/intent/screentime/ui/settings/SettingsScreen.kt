@@ -64,10 +64,10 @@ fun SettingsScreen(
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "Intent export")
+            putExtra(Intent.EXTRA_SUBJECT, "CC0015 Intent export")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(send, "Export Intent data"))
+        context.startActivity(Intent.createChooser(send, "Export CC0015 Intent data"))
         onExportConsumed()
     }
 

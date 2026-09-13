@@ -156,7 +156,7 @@ fun DayCardScreen(
                     EmptyState(
                         icon = Icons.Filled.EventBusy,
                         title = "Nothing was tracked that day",
-                        body = "Intent has no usage recorded here — the day may predate your " +
+                        body = "CC0015 Intent has no usage recorded here — the day may predate your " +
                             "first install, or the phone stayed off. There is nothing to " +
                             "judge, and this card says so rather than showing you zeroes.",
                     )

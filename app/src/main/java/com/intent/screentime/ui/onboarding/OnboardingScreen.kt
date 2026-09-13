@@ -51,7 +51,7 @@ fun OnboardingScreen(
         Spacer(Modifier.height(24.dp))
 
         Text(
-            text = "Intent",
+            text = "CC0015 Intent",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,

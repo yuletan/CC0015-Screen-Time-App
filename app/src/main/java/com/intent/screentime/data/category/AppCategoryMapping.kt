@@ -4,7 +4,7 @@ import android.content.pm.ApplicationInfo
 import com.intent.screentime.data.local.DefaultCategories
 
 /**
- * Android's own app categories mapped onto Intent's seed categories.
+ * Android's own app categories mapped onto CC0015 Intent's seed categories.
  *
  * Split out from [CategoryClassifier] so the mapping is a pure function: the fallback
  * behaviour for an app Android cannot classify is the part most worth testing, and it

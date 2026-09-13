@@ -81,7 +81,7 @@ fun InsightsScreen(
                     EmptyState(
                         icon = Icons.Filled.Insights,
                         title = "Not enough history yet",
-                        body = "Intent needs a couple of days of usage before trends mean " +
+                        body = "CC0015 Intent needs a couple of days of usage before trends mean " +
                             "anything. Come back tomorrow and this fills in.",
                     )
                 }

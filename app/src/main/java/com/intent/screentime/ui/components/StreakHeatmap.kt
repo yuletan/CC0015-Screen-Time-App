@@ -59,8 +59,13 @@ fun StreakHeatmap(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 week.forEach { cell ->
+                    val filled = cell.hasData
                     val fill = when {
-                        !cell.hasData -> scheme.surfaceContainerLow
+                        // Absence, not failure — but it still has to be visible. A fill one
+                        // step off the panel colour disappears entirely, which leaves a
+                        // twelve-week grid reading as a blank card and hides the fact that
+                        // the days are tappable at all.
+                        !filled -> Color.Transparent
                         cell.metCap && cell.metGoal -> data.production
                         cell.metCap -> scheme.primary
                         else -> scheme.surfaceContainerHighest
@@ -76,10 +81,10 @@ fun StreakHeatmap(
                         .clip(shape)
                         .background(fill)
                         .then(
-                            if (cell.isToday) {
-                                Modifier.border(1.5.dp, scheme.onSurface, shape)
-                            } else {
-                                Modifier
+                            when {
+                                cell.isToday -> Modifier.border(1.5.dp, scheme.onSurface, shape)
+                                !filled -> Modifier.border(1.dp, scheme.outlineVariant, shape)
+                                else -> Modifier
                             },
                         )
                         .then(
