@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive launcher foreground: the ring, drawn as a stroked arc so it stays legible
+  under every OEM mask. Kept inside the 66dp safe zone of the 108dp canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,32 a22,22 0 1,0 0,44 a22,22 0 1,0 0,-44"
+        android:strokeColor="#F2542A"
+        android:strokeWidth="8"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#FFC14D"
+        android:pathData="M54,46 a8,8 0 1,0 0,16 a8,8 0 1,0 0,-16" />
+</vector>

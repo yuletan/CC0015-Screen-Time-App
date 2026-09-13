@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The database and the preference file are the only things worth backing up. Usage
+  events, sessions and rollups are rebuilt from the device, but the categories and
+  targets someone chose are not. Exports live in the cache, which backup never covers.
+-->
+<full-backup-content>
+    <include domain="database" path="intent.db" />
+    <include domain="database" path="intent.db-wal" />
+    <include domain="database" path="intent.db-shm" />
+    <include domain="file" path="datastore/intent_prefs.preferences_pb" />
+</full-backup-content>
