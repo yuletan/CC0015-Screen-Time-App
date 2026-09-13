@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.intent.screentime.core.time.DayWindow
 import com.intent.screentime.data.goals.IntentScore
 import com.intent.screentime.data.goals.StreakEvaluator
+import com.intent.screentime.data.local.DefaultCategories
 import com.intent.screentime.data.local.entity.CategoryKind
 import com.intent.screentime.data.local.entity.DailyAppUsageEntity
 import com.intent.screentime.data.local.entity.DailySummaryEntity
@@ -36,6 +37,9 @@ data class TodayUiState(
     val consumptionMs: Long = 0L,
     val utilityMs: Long = 0L,
     val neutralMs: Long = 0L,
+    /** Today's app time that no category has claimed yet — the backlog triage clears. */
+    val unsortedCount: Int = 0,
+    val unsortedMs: Long = 0L,
     val capMinutes: Int? = null,
     val deltaVsYesterdayMs: Long = 0L,
     val hasYesterday: Boolean = false,
@@ -122,8 +126,17 @@ class TodayViewModel(
         var consumption = 0L
         var utility = 0L
         var neutral = 0L
+        var unsortedCount = 0
+        var unsortedMs = 0L
         for (row in appUsage) {
-            when (categories[row.packageName]?.kind) {
+            val ref = categories[row.packageName]
+            // A missing row or the placeholder category are the same thing to the user:
+            // this app has no side yet, so its time counts as unsorted rather than neutral.
+            if (ref == null || ref.id == DefaultCategories.UNCATEGORIZED) {
+                unsortedCount += 1
+                unsortedMs += row.totalMs
+            }
+            when (ref?.kind) {
                 CategoryKind.PRODUCTION -> production += row.totalMs
                 CategoryKind.CONSUMPTION -> consumption += row.totalMs
                 CategoryKind.UTILITY -> utility += row.totalMs
@@ -143,6 +156,8 @@ class TodayViewModel(
             consumptionMs = consumption,
             utilityMs = utility,
             neutralMs = neutral,
+            unsortedCount = unsortedCount,
+            unsortedMs = unsortedMs,
             capMinutes = capTarget?.valueMinutes,
             deltaVsYesterdayMs = if (yesterday != null) screenTime - yesterday.screenTimeMs else 0L,
             hasYesterday = yesterday != null,

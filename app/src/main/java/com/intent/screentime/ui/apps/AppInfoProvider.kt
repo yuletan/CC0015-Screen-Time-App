@@ -29,8 +29,24 @@ class AppInfoProvider(
     private val icons = LruCache<String, ImageBitmap>(MAX_ICONS)
     private val labels = LruCache<String, String>(MAX_LABELS)
     private val monogramColors = LruCache<String, Int>(MAX_LABELS)
+    private val launchable = LruCache<String, Boolean>(MAX_LAUNCHABLE)
 
     fun icon(packageName: String): ImageBitmap? = icons.get(packageName)
+
+    /**
+     * Whether the package has anything the launcher can actually open.
+     *
+     * The `app_category` table is seeded from Android's own list of packages, and that list
+     * includes components the user never launches — so without this check they would sit in
+     * the triage queue forever, unfixable and unremovable. Cheap enough to cache because the
+     * answer never changes while the app is running.
+     */
+    fun isLaunchable(packageName: String): Boolean {
+        launchable.get(packageName)?.let { return it }
+        val resolved = packageManager.getLaunchIntentForPackage(packageName) != null
+        launchable.put(packageName, resolved)
+        return resolved
+    }
 
     fun label(packageName: String): String {
         labels.get(packageName)?.let { return it }
@@ -90,6 +106,7 @@ class AppInfoProvider(
     private companion object {
         const val MAX_ICONS = 220
         const val MAX_LABELS = 400
+        const val MAX_LAUNCHABLE = 400
         const val MONOGRAM_COLORS = 8
     }
 }
