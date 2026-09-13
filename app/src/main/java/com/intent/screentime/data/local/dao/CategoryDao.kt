@@ -19,6 +19,13 @@ data class AppCategoryRow(
     val colorHex: String,
 )
 
+/** One app waiting to be sorted, with the usage evidence that justifies sorting it. */
+data class UnsortedAppRow(
+    val packageName: String,
+    val totalMs: Long,
+    val sessionCount: Int,
+)
+
 @Dao
 interface CategoryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -53,6 +60,28 @@ interface CategoryDao {
 
     @Query("SELECT COUNT(*) FROM app_category WHERE categoryId = :categoryId")
     suspend fun appCountForCategory(categoryId: String): Int
+
+    /**
+     * The triage queue: every app still sitting in [categoryId], ranked by how much it has
+     * been used since [fromDay].
+     *
+     * A LEFT JOIN, so an app that was classified but never opened still appears — it is
+     * exactly the kind of app a queue should clear out — and it sorts last because its
+     * usage is zero.
+     */
+    @Query(
+        "SELECT ac.packageName AS packageName, " +
+            "COALESCE(SUM(u.totalMs), 0) AS totalMs, " +
+            "COALESCE(SUM(u.sessionCount), 0) AS sessionCount " +
+            "FROM app_category ac LEFT JOIN daily_app_usage u " +
+            "ON u.packageName = ac.packageName AND u.dayEpochDay >= :fromDay " +
+            "WHERE ac.categoryId = :categoryId " +
+            "GROUP BY ac.packageName ORDER BY totalMs DESC, ac.packageName ASC",
+    )
+    suspend fun unsortedWithUsage(
+        categoryId: String,
+        fromDay: Long,
+    ): List<UnsortedAppRow>
 
     @Upsert
     suspend fun upsertAppCategories(rows: List<AppCategoryEntity>)

@@ -19,4 +19,8 @@ interface IntentLogDao {
 
     @Query("SELECT COUNT(*) FROM intent_log")
     suspend fun count(): Long
+
+    /** Answered prompts only: the numerator of the answer rate. */
+    @Query("SELECT COUNT(*) FROM intent_log WHERE skipped = 0")
+    suspend fun answeredCount(): Long
 }

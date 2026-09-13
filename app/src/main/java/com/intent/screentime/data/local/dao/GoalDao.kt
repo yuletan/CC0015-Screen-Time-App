@@ -67,6 +67,9 @@ interface StreakDayDao {
     @Query("SELECT * FROM streak_day WHERE dayEpochDay BETWEEN :fromDay AND :toDay ORDER BY dayEpochDay ASC")
     suspend fun between(fromDay: Long, toDay: Long): List<StreakDayEntity>
 
+    @Query("SELECT * FROM streak_day WHERE dayEpochDay = :dayEpochDay")
+    suspend fun getDay(dayEpochDay: Long): StreakDayEntity?
+
     @Query("SELECT * FROM streak_day ORDER BY dayEpochDay DESC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<StreakDayEntity>>
 }

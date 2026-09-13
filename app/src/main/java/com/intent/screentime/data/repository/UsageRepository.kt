@@ -1,13 +1,17 @@
 package com.intent.screentime.data.repository
 
 import com.intent.screentime.core.time.DayWindow
+import com.intent.screentime.data.intent.Reasons
 import com.intent.screentime.data.local.DefaultCategories
 import com.intent.screentime.data.local.IntentDatabase
+import com.intent.screentime.data.local.dao.UnsortedAppRow
 import com.intent.screentime.data.local.entity.AppSessionEntity
 import com.intent.screentime.data.local.entity.CategoryEntity
 import com.intent.screentime.data.local.entity.CategoryKind
 import com.intent.screentime.data.local.entity.DailyAppUsageEntity
 import com.intent.screentime.data.local.entity.DailySummaryEntity
+import com.intent.screentime.data.local.entity.DayNoteEntity
+import com.intent.screentime.data.local.entity.DayReflection
 import com.intent.screentime.data.local.entity.FocusSessionEntity
 import com.intent.screentime.data.local.entity.IntentLogEntity
 import com.intent.screentime.data.local.entity.StreakDayEntity
@@ -184,12 +188,37 @@ class UsageRepository(
 
     // --- intent prompt (Phase 7, opt-in) -----------------------------------
 
-    suspend fun logIntent(packageName: String, label: String, timestampMs: Long) {
+    /**
+     * One row per prompt. [option] carries both the stable key the ledger groups by and
+     * the chip text it displays, so a single vocabulary serves both.
+     */
+    suspend fun logIntent(packageName: String, option: Reasons.Option, timestampMs: Long) {
         database.intentLogDao().insert(
             IntentLogEntity(
                 packageName = packageName,
                 timestampMs = timestampMs,
-                intentLabel = label,
+                intentLabel = option.label,
+                reasonKey = option.key,
+                skipped = false,
+            ),
+        )
+    }
+
+    /**
+     * A prompt the user let close unanswered.
+     *
+     * Recorded rather than discarded: "you answered 34 of 51" is a finding about the habit,
+     * and it is only computable if the denominator is stored. The label is empty because
+     * there was no answer to label.
+     */
+    suspend fun logSkippedIntent(packageName: String, timestampMs: Long) {
+        database.intentLogDao().insert(
+            IntentLogEntity(
+                packageName = packageName,
+                timestampMs = timestampMs,
+                intentLabel = "",
+                reasonKey = null,
+                skipped = true,
             ),
         )
     }
@@ -199,9 +228,59 @@ class UsageRepository(
 
     suspend fun intentLogCount(): Long = database.intentLogDao().count()
 
+    suspend fun intentAnsweredCount(): Long = database.intentLogDao().answeredCount()
+
     /** The sessions an intent's stated purpose can be judged against. */
     suspend fun sessionsBetween(fromMs: Long, toMs: Long): List<AppSessionEntity> =
         database.appSessionDao().sessionsOverlapping(fromMs, toMs)
+
+    // --- day cards ---------------------------------------------------------
+
+    suspend fun appUsageForDay(epochDay: Long): List<DailyAppUsageEntity> =
+        database.dailyAppUsageDao().forDay(epochDay)
+
+    fun observeDayNote(epochDay: Long): Flow<DayNoteEntity?> =
+        database.dayNoteDao().observe(epochDay)
+
+    suspend fun dayNote(epochDay: Long): DayNoteEntity? = database.dayNoteDao().get(epochDay)
+
+    /**
+     * Both day-note setters read before they write. A blind upsert of a fresh entity would
+     * null whichever of the two fields the caller was not setting.
+     */
+    suspend fun setDayNote(epochDay: Long, note: String?) {
+        val existing = database.dayNoteDao().get(epochDay)
+        database.dayNoteDao().upsert(
+            DayNoteEntity(
+                dayEpochDay = epochDay,
+                note = note?.takeIf { it.isNotBlank() },
+                reflection = existing?.reflection,
+                updatedAtMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    suspend fun setDayReflection(epochDay: Long, reflection: DayReflection?) {
+        val existing = database.dayNoteDao().get(epochDay)
+        database.dayNoteDao().upsert(
+            DayNoteEntity(
+                dayEpochDay = epochDay,
+                note = existing?.note,
+                reflection = reflection?.key,
+                updatedAtMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    // --- triage ------------------------------------------------------------
+
+    /** Every app still unsorted, ranked by usage over the window. */
+    suspend fun unsortedQueue(
+        fromDay: Long = DayWindow.todayEpochDay() - TRIAGE_LOOKBACK_DAYS,
+    ): List<UnsortedAppRow> = database.categoryDao().unsortedWithUsage(
+        categoryId = DefaultCategories.UNCATEGORIZED,
+        fromDay = fromDay,
+    )
 
     /** Re-harvests from the OS. Called when a screen opens, so the day is never stale. */
     suspend fun refresh() {
@@ -231,5 +310,8 @@ class UsageRepository(
 
     private companion object {
         const val DEFAULT_RESCORE_DAYS = 30L
+
+        /** How far back the triage queue looks to rank apps by how much they matter. */
+        const val TRIAGE_LOOKBACK_DAYS = 30L
     }
 }

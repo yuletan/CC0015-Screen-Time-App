@@ -44,6 +44,8 @@ import com.intent.screentime.ui.appdetail.AppDetailViewModel
 import com.intent.screentime.ui.apps.AppsScreen
 import com.intent.screentime.ui.apps.AppsViewModel
 import com.intent.screentime.ui.components.SetCapDialog
+import com.intent.screentime.ui.daycard.DayCardScreen
+import com.intent.screentime.ui.daycard.DayCardViewModel
 import com.intent.screentime.ui.focus.FocusScreen
 import com.intent.screentime.ui.focus.FocusViewModel
 import com.intent.screentime.ui.goals.GoalsScreen
@@ -59,6 +61,8 @@ import com.intent.screentime.ui.settings.SettingsViewModel
 import com.intent.screentime.ui.status.TrackingStatusScreen
 import com.intent.screentime.ui.today.TodayScreen
 import com.intent.screentime.ui.today.TodayViewModel
+import com.intent.screentime.ui.triage.TriageScreen
+import com.intent.screentime.ui.triage.TriageViewModel
 
 private enum class Destination(
     val route: String,
@@ -76,6 +80,13 @@ private const val DIAGNOSTICS_ROUTE = "diagnostics"
 private const val CATEGORY_EDITOR_ROUTE = "categories"
 private const val APP_DETAIL_ROUTE = "app"
 private const val APP_DETAIL_ARG = "packageName"
+
+/** The triage sheet. A route rather than a dialog so the nightly digest can deep-link it. */
+private const val TRIAGE_ROUTE = "triage"
+
+/** One past day's card, reached by tapping its square on the heatmap. */
+private const val DAY_CARD_ROUTE = "day"
+private const val DAY_CARD_ARG = "epochDay"
 
 /** Settings is pushed from Today rather than living in the bar: five tabs is already the limit. */
 private const val SETTINGS_ROUTE = "settings"
@@ -142,6 +153,7 @@ fun IntentNavHost(
                     onRefresh = vm::refresh,
                     onSetCap = vm::setCap,
                     onOpenApps = { navController.navigate(Destination.Apps.route) },
+                    onOpenTriage = { navController.navigate(TRIAGE_ROUTE) },
                     onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }
@@ -160,6 +172,7 @@ fun IntentNavHost(
                     onOpenApp = { packageName ->
                         navController.navigate("$APP_DETAIL_ROUTE/$packageName")
                     },
+                    onSortCategories = { navController.navigate(TRIAGE_ROUTE) },
                 )
             }
 
@@ -217,7 +230,55 @@ fun IntentNavHost(
                 )
                 val state by vm.state.collectAsStateWithLifecycle()
 
-                GoalsScreen(state = state, onSetTarget = vm::setTarget)
+                GoalsScreen(
+                    state = state,
+                    onSetTarget = vm::setTarget,
+                    onOpenDay = { epochDay ->
+                        navController.navigate("$DAY_CARD_ROUTE/$epochDay")
+                    },
+                )
+            }
+
+            composable(TRIAGE_ROUTE) {
+                val vm: TriageViewModel = viewModel(
+                    factory = IntentViewModelFactory {
+                        TriageViewModel(container.usageRepository, container.appInfoProvider)
+                    },
+                )
+                val state by vm.state.collectAsStateWithLifecycle()
+
+                TriageScreen(
+                    state = state,
+                    appInfo = container.appInfoProvider,
+                    onAssign = vm::assign,
+                    onUndo = vm::undo,
+                    onDone = { navController.popBackStack() },
+                )
+            }
+
+            composable(
+                route = "$DAY_CARD_ROUTE/{$DAY_CARD_ARG}",
+                arguments = listOf(navArgument(DAY_CARD_ARG) { type = NavType.LongType }),
+            ) { entry ->
+                val epochDay = entry.arguments?.getLong(DAY_CARD_ARG) ?: 0L
+                val vm: DayCardViewModel = viewModel(
+                    factory = IntentViewModelFactory {
+                        DayCardViewModel(
+                            epochDay = epochDay,
+                            repository = container.usageRepository,
+                            appInfo = container.appInfoProvider,
+                        )
+                    },
+                )
+                val state by vm.state.collectAsStateWithLifecycle()
+
+                DayCardScreen(
+                    state = state,
+                    appInfo = container.appInfoProvider,
+                    onBack = { navController.popBackStack() },
+                    onSetNote = vm::setNote,
+                    onSetReflection = vm::setReflection,
+                )
             }
 
             composable(Destination.Insights.route) {

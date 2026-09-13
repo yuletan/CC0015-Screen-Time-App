@@ -7,6 +7,7 @@ import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.intent.screentime.IntentApp
 import com.intent.screentime.core.di.AppContainer
+import com.intent.screentime.data.intent.Reasons
 import com.intent.screentime.data.usage.UsageEventTypes
 import com.intent.screentime.notify.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
@@ -103,7 +104,8 @@ class IntentWatchService : Service() {
                     scope.launch {
                         container.usageRepository.logIntent(
                             packageName = packageName,
-                            label = answer,
+                            option = Reasons.optionFor(Reasons.keyForLabel(answer))
+                                ?: Reasons.Option(answer, answer),
                             timestampMs = System.currentTimeMillis(),
                         )
                     }

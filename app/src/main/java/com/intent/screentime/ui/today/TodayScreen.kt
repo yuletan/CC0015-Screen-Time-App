@@ -79,6 +79,7 @@ fun TodayScreen(
     onRefresh: () -> Unit,
     onSetCap: (Int?) -> Unit,
     onOpenApps: () -> Unit,
+    onOpenTriage: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {

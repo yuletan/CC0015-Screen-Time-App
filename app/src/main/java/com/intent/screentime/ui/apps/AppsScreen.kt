@@ -44,6 +44,7 @@ fun AppsScreen(
     state: AppsUiState,
     appInfo: AppInfoProvider,
     onOpenApp: (String) -> Unit,
+    onSortCategories: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(

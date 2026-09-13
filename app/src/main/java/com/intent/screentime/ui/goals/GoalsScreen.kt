@@ -49,6 +49,7 @@ import com.intent.screentime.ui.theme.dataColors
 fun GoalsScreen(
     state: GoalsUiState,
     onSetTarget: (TargetType, Int?) -> Unit,
+    onOpenDay: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var editing by remember { mutableStateOf<TargetType?>(null) }
