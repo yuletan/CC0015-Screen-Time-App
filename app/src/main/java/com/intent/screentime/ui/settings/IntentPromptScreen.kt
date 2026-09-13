@@ -48,7 +48,7 @@ fun IntentPromptScreen(
     enabled: Boolean,
     watched: Set<String>,
     apps: List<InstalledApp>,
-    promptCount: Long,
+    promptCount: PromptCounts,
     overlayGranted: Boolean,
     onBack: () -> Unit,
     onToggle: (Boolean) -> Unit,
@@ -97,9 +97,10 @@ fun IntentPromptScreen(
             Panel(title = "What it does") {
                 Text(
                     text = "When you open an app you flagged, Intent shows a short card " +
-                        "first: what are you here for? Answer in one tap, or ignore it — " +
-                        "it closes itself after 15 seconds and nothing is recorded unless " +
-                        "you choose an answer.",
+                        "first: what are you here for? Answer in one tap, or just ignore " +
+                        "it — it closes itself after 15 seconds. Either way the prompt " +
+                        "itself is recorded: your reason if you gave one, or a quiet note " +
+                        "that you let it close.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -119,10 +120,11 @@ fun IntentPromptScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = if (promptCount > 0) {
-                        "$promptCount prompts answered so far."
+                    text = if (promptCount.total > 0) {
+                        "${promptCount.answered} of ${promptCount.total} prompts " +
+                            "answered so far."
                     } else {
-                        "No prompts answered yet."
+                        "No prompts raised yet."
                     },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,

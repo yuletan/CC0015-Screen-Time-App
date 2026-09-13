@@ -25,8 +25,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
+import com.intent.screentime.data.intent.IntentStats
 import com.intent.screentime.ui.components.BarColumn
 import com.intent.screentime.ui.components.ColumnChart
 import com.intent.screentime.ui.components.DonutChart
@@ -96,8 +98,14 @@ fun InsightsScreen(
         if (state.hasRatioTrend) {
             item { ProductionRatioPanel(state) }
         }
-        if (state.intents.isNotEmpty()) {
-            item { IntentPanel(state) }
+        val insight = state.intentInsight
+        if (insight != null) {
+            item { IntentPanel(insight) }
+            // A second panel only earns its place when the top app has more than one
+            // reason to tell apart; a one-row panel would just repeat the headline.
+            if (insight.topPackageLabel != null && insight.topPackageSummaries.size > 1) {
+                item { TopPackagePanel(insight.topPackageLabel, insight.topPackageSummaries) }
+            }
         }
     }
 }
@@ -379,61 +387,175 @@ private fun ProductionRatioPanel(state: InsightsUiState) {
 }
 
 /**
- * The Phase 7 payoff: the stated reason, and the session that followed it.
+ * The Phase 7 payoff: why things were opened, how often the question was answered, and
+ * when.
  *
- * Nothing here is shown until the intent prompt has been switched on and answered at
- * least once, which keeps the screen honest for everyone who never opted in.
+ * Shown whenever a single prompt exists in the range — *including* a range in which every
+ * prompt was let close. Hiding the all-skipped case would hide the one thing this panel
+ * is most honest about: how often the question went unanswered.
  */
 @Composable
-private fun IntentPanel(state: InsightsUiState) {
-    val data = dataColors
+private fun IntentPanel(insight: IntentInsight) {
+    val total = insight.answered + insight.skipped
 
-    Panel(title = "What you came for") {
-        state.intents.forEachIndexed { index, summary ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+    Panel(title = "Why you opened things") {
+        if (insight.overall.isNotEmpty()) {
+            ReasonRows(insight.overall)
+
+            Spacer(Modifier.height(Spacing.xs))
+
+            Text(
+                text = "Follow-up is how long you stayed after answering. The gap between " +
+                    "the reason and the reality is the whole point of asking.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Text(
+            text = if (insight.skipped > 0) {
+                "You answered ${insight.answered} of $total prompts. The other " +
+                    "${insight.skipped} you let close."
+            } else {
+                "You answered all $total prompts."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        HourClockStrip(insight.hourCounts)
+
+        if (insight.topReasonLabel != null && insight.topReasonWindow != null) {
+            Text(
+                text = "Your '${insight.topReasonLabel}' opens cluster " +
+                    "${insight.topReasonWindow}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** One app's own reasons, when the range has more than one to separate. */
+@Composable
+private fun TopPackagePanel(label: String, summaries: List<IntentStats.Summary>) {
+    Panel(title = "Why you opened $label") {
+        ReasonRows(summaries)
+    }
+}
+
+/**
+ * The per-reason rows, shared between the overall panel and the per-app one so the two can
+ * never render the same number two different ways.
+ */
+@Composable
+private fun ReasonRows(summaries: List<IntentStats.Summary>) {
+    val data = dataColors
+    summaries.forEachIndexed { index, summary ->
+        ReasonRow(
+            summary = summary,
+            color = data.series[index % data.series.size],
+        )
+    }
+}
+
+/** Colour dot, reason, count, and what the stated reason actually turned into. */
+@Composable
+private fun ReasonRow(summary: IntentStats.Summary, color: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Text(
+            text = summary.label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = Spacing.sm),
+        )
+        Text(
+            text = "${summary.count}×",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = if (summary.averageFollowUpMs > 0L) {
+                " · avg ${DurationFormat.compact(summary.averageFollowUpMs)}"
+            } else {
+                ""
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * How many prompts landed in each hour of the day.
+ *
+ * Deliberately not the shared HourlyStrip: that one colours each bar by the category kind
+ * that dominated the hour, which says nothing about a reason, so its palette would be
+ * meaningless here. Every bar here carries the same accent and only the height matters —
+ * the shape of *when* things get opened, not what for.
+ */
+@Composable
+private fun HourClockStrip(hourCounts: List<Int>, modifier: Modifier = Modifier) {
+    val peak = hourCounts.maxOrNull() ?: 0
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            hourCounts.forEach { count ->
+                val fraction = if (peak > 0) count.toFloat() / peak.toFloat() else 0f
                 Box(
-                    Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(data.series[index % data.series.size]),
-                )
-                Text(
-                    text = summary.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = Spacing.sm),
+                        .height((44 * fraction).dp.coerceAtLeast(3.dp))
+                        .clip(CircleShape)
+                        .background(
+                            if (count > 0) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            },
+                        ),
                 )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            listOf(0, 6, 12, 18, 23).forEach { hour ->
                 Text(
-                    text = "${summary.count}×",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = if (summary.averageFollowUpMs > 0L) {
-                        " · avg ${DurationFormat.compact(summary.averageFollowUpMs)}"
-                    } else {
-                        ""
-                    },
+                    text = hourTickLabel(hour),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-
-        Spacer(Modifier.height(Spacing.xs))
-
-        Text(
-            text = "Follow-up is how long you stayed after answering. The gap between the " +
-                "reason and the reality is the whole point of asking.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
+}
+
+private fun hourTickLabel(hour: Int): String = when (hour) {
+    0 -> "12a"
+    12 -> "12p"
+    23 -> "11p"
+    in 1..11 -> "${hour}a"
+    else -> "${hour - 12}p"
 }
 
 private const val MAX_LEGEND_ROWS = 6

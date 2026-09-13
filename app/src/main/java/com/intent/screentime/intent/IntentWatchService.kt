@@ -7,7 +7,6 @@ import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.intent.screentime.IntentApp
 import com.intent.screentime.core.di.AppContainer
-import com.intent.screentime.data.intent.Reasons
 import com.intent.screentime.data.usage.UsageEventTypes
 import com.intent.screentime.notify.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
@@ -96,22 +95,28 @@ class IntentWatchService : Service() {
 
     private suspend fun askWhy(container: AppContainer, packageName: String) {
         val label = container.classifier.labelOf(packageName)
+        // Stamped once, when the prompt is raised, so a skip is recorded at the moment the
+        // question was asked rather than the moment it timed out. That keeps it in the
+        // hour it belongs to.
+        val askedAt = System.currentTimeMillis()
 
         withContext(Dispatchers.Main) {
             overlay.show(
                 appLabel = label,
-                onAnswer = { answer ->
+                onAnswer = { option ->
                     scope.launch {
-                        container.usageRepository.logIntent(
-                            packageName = packageName,
-                            option = Reasons.optionFor(Reasons.keyForLabel(answer))
-                                ?: Reasons.Option(answer, answer),
-                            timestampMs = System.currentTimeMillis(),
-                        )
+                        container.usageRepository.logIntent(packageName, option, askedAt)
                     }
                 },
                 onTimeoutAnswer = {
-                    // An unanswered prompt is not an answer, so nothing is recorded.
+                    // Deliberately reversed from the original "nothing is recorded": an
+                    // unanswered prompt is now written down too. The denominator is a
+                    // finding in its own right — "you answered 34 of 51" is only
+                    // computable if the 17 you ignored are kept — and skipping the
+                    // question without the row would quietly inflate the answer rate.
+                    scope.launch {
+                        container.usageRepository.logSkippedIntent(packageName, askedAt)
+                    }
                 },
             )
         }

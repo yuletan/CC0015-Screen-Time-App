@@ -40,6 +40,24 @@ data class AppTotal(
     val totalMs: Long,
 )
 
+/**
+ * The reason ledger, shaped for the screen.
+ *
+ * [topPackageLabel] is resolved here — through [AppInfoProvider], a PackageManager call —
+ * so the composable never has to. [topPackageSummaries] is that app's own breakdown, which
+ * is the "why did *this* app keep pulling me in" answer the headline asks for.
+ */
+data class IntentInsight(
+    val answered: Int,
+    val skipped: Int,
+    val overall: List<IntentStats.Summary>,
+    val topPackageLabel: String?,
+    val topPackageSummaries: List<IntentStats.Summary>,
+    val hourCounts: List<Int>,
+    val topReasonLabel: String?,
+    val topReasonWindow: String?,
+)
+
 data class InsightsUiState(
     val loading: Boolean = true,
     val rangeDays: Int = 7,
@@ -54,8 +72,12 @@ data class InsightsUiState(
     val weekendAverageMs: Long = 0L,
     /** Production share per day, as a whole percent, over days that have categorised time. */
     val productionRatios: List<Long> = emptyList(),
-    /** Answered intent prompts, only ever non-empty once Phase 7 is switched on. */
-    val intents: List<IntentStats.Summary> = emptyList(),
+    /**
+     * The reason ledger. Null only when no prompt was ever raised in the range — once a
+     * single row exists it is shown, *including* a range where every prompt was skipped,
+     * because then the answer rate is the whole story.
+     */
+    val intentInsight: IntentInsight? = null,
 ) {
     val hasData: Boolean get() = points.any { it.screenTimeMs > 0L }
     val totalMs: Long get() = points.sumOf { it.screenTimeMs }
@@ -154,16 +176,42 @@ class InsightsViewModel(
             (point.productionMs.toDouble() / accountable * 100.0).roundToLong()
         }
 
-        // Only queried when the user has ever answered a prompt: the two reads are cheap
-        // but pointless for someone who never turned Phase 7 on.
+        // Only queried when the user has ever raised a prompt: the two reads are cheap but
+        // pointless for someone who never turned Phase 7 on. A single row — even a lone
+        // skip — is enough to render, because the answer rate is itself the finding.
         val logs = repository.intentLogsBetween(
             DayWindow.startOfDayMs(fromDay),
             System.currentTimeMillis(),
         )
-        val intents = if (logs.isEmpty()) {
-            emptyList()
+        val intentInsight = if (logs.isEmpty()) {
+            null
         } else {
-            IntentStats.summarize(logs, repository.sessionsBetween(logs.first().timestampMs, System.currentTimeMillis()))
+            val ledger = IntentStats.ledger(
+                logs = logs,
+                sessions = repository.sessionsBetween(
+                    logs.first().timestampMs,
+                    System.currentTimeMillis(),
+                ),
+                zone = DayWindow.zone,
+            )
+            // The app with the most *answered* prompts, not the most rows: a package the
+            // user kept ignoring is a story about the question, not about the app.
+            val topPackage = logs
+                .filterNot { it.skipped }
+                .groupBy { it.packageName }
+                .maxByOrNull { it.value.size }
+                ?.key
+
+            IntentInsight(
+                answered = ledger.answered,
+                skipped = ledger.skipped,
+                overall = ledger.overall,
+                topPackageLabel = topPackage?.let { appInfo.label(it) },
+                topPackageSummaries = topPackage?.let { ledger.byPackage[it] }.orEmpty(),
+                hourCounts = ledger.hourCounts,
+                topReasonLabel = ledger.topReasonLabel,
+                topReasonWindow = ledger.topReasonWindow,
+            )
         }
 
         return InsightsUiState(
@@ -179,7 +227,7 @@ class InsightsViewModel(
             weekdayAverageMs = weekdayDays.averageOrZero(),
             weekendAverageMs = weekendDays.averageOrZero(),
             productionRatios = ratios,
-            intents = intents,
+            intentInsight = intentInsight,
         )
     }
 
