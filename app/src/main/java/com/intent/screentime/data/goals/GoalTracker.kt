@@ -2,6 +2,7 @@ package com.intent.screentime.data.goals
 
 import androidx.room.withTransaction
 import com.intent.screentime.core.time.DayWindow
+import com.intent.screentime.data.local.DefaultCategories
 import com.intent.screentime.data.local.IntentDatabase
 import com.intent.screentime.data.local.entity.StreakDayEntity
 import com.intent.screentime.data.prefs.UserPreferences
@@ -122,6 +123,10 @@ class GoalTracker(
     /**
      * The daily digest. Harvests first so the number is current, and stays quiet on a
      * day with no usage rather than announcing zeroes.
+     *
+     * The digest is also where the nightly question gets asked, so it is loaded here:
+     * asked only while the day is unanswered, and only about a day there is something to
+     * say about. Once answered, the notification drops the question for good.
      */
     suspend fun postDigest(): Boolean {
         val today = DayWindow.todayEpochDay()
@@ -138,10 +143,17 @@ class GoalTracker(
                 ?.totalMs
         } ?: 0L
 
+        val answered = database.dayNoteDao().get(today)?.reflection != null
+        val hasUnsorted = database.categoryDao()
+            .appCountForCategory(DefaultCategories.UNCATEGORIZED) > 0
+
         notifier.notifyDigest(
             screenTimeMs = summary.screenTimeMs,
             topLabel = topPackage?.let(labelOf),
             topMs = topMs,
+            askReflection = !answered,
+            contentIntent = notifier.dayCardIntent(today),
+            sortIntent = if (hasUnsorted) notifier.sortAppsIntent() else null,
         )
         preferences.setLastDigestEpochDay(today)
         return true
