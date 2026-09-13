@@ -98,10 +98,21 @@ fun IntentNavHost(
     dynamicColor: Boolean,
     onDynamicColorChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    deepLinkRoute: String? = null,
+    onDeepLinkConsumed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+
+    // A route from a notification, opened once the graph exists and then consumed, so a
+    // recomposition never re-navigates. Only routes that already exist are ever sent.
+    LaunchedEffect(deepLinkRoute) {
+        if (!deepLinkRoute.isNullOrBlank()) {
+            navController.navigate(deepLinkRoute)
+            onDeepLinkConsumed()
+        }
+    }
 
     Scaffold(
         modifier = modifier,

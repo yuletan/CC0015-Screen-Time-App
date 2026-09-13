@@ -75,7 +75,7 @@ fun GoalsScreen(
             }
         }
 
-        item { StreakPanel(state) }
+        item { StreakPanel(state, onOpenDay) }
 
         item {
             WeeklyGoalPanel(
@@ -141,7 +141,7 @@ fun GoalsScreen(
 }
 
 @Composable
-private fun StreakPanel(state: GoalsUiState) {
+private fun StreakPanel(state: GoalsUiState, onOpenDay: (Long) -> Unit) {
     val data = dataColors
 
     Panel(title = "Streak") {
@@ -182,11 +182,17 @@ private fun StreakPanel(state: GoalsUiState) {
 
         Spacer(Modifier.height(Spacing.xs))
 
-        StreakHeatmap(weeks = state.heatmap)
+        StreakHeatmap(weeks = state.heatmap, onCellClick = onOpenDay)
 
         Spacer(Modifier.height(Spacing.xs))
 
         StreakHeatmapLegend()
+
+        Text(
+            text = "Tap a day for its card.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

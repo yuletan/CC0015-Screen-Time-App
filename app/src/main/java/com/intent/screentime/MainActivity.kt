@@ -2,6 +2,7 @@ package com.intent.screentime
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -29,13 +30,25 @@ import com.intent.screentime.core.permission.UsageAccess
 import com.intent.screentime.ui.nav.IntentNavHost
 import com.intent.screentime.ui.onboarding.OnboardingScreen
 import com.intent.screentime.ui.theme.IntentTheme
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    /**
+     * A route handed in by a notification, waiting to be forwarded to the nav graph.
+     *
+     * Held in a flow rather than read once: a digest tapped while the app is already open
+     * arrives through [onNewIntent], and the value has to survive recomposition to reach the
+     * host. It is cleared once consumed so a later recomposition does not navigate again.
+     */
+    private val deepLinkRoute = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        deepLinkRoute.value = intent?.getStringExtra(EXTRA_ROUTE)
 
         val container = (application as IntentApp).container
 
@@ -60,6 +73,8 @@ class MainActivity : ComponentActivity() {
                     val onboardingComplete by container.preferences.onboardingComplete
                         .collectAsStateWithLifecycle(initialValue = false)
 
+                    val route by deepLinkRoute.collectAsStateWithLifecycle()
+
                     DisposableEffect(lifecycleOwner) {
                         val observer = LifecycleEventObserver { _, event ->
                             if (event == Lifecycle.Event.ON_RESUME) {
@@ -83,6 +98,8 @@ class MainActivity : ComponentActivity() {
                             onDynamicColorChange = { enabled ->
                                 scope.launch { container.preferences.setDynamicColor(enabled) }
                             },
+                            deepLinkRoute = route,
+                            onDeepLinkConsumed = { deepLinkRoute.value = null },
                         )
                     } else {
                         OnboardingScreen(
@@ -102,6 +119,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** A digest tapped while the app is open. `singleTop` keeps this from spawning a second. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(EXTRA_ROUTE)?.let { deepLinkRoute.value = it }
+    }
+
+    companion object {
+        /**
+         * The extra a notification's [android.app.PendingIntent] carries: a nav route for the
+         * host to open. An explicit extra rather than a URI scheme, so no intent filter has
+         * to be declared and no other app can deep-link in.
+         */
+        const val EXTRA_ROUTE = "route"
     }
 }
 

@@ -6,10 +6,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.intent.screentime.MainActivity
 import com.intent.screentime.R
 import com.intent.screentime.core.format.DurationFormat
 import com.intent.screentime.data.goals.CapAlert
@@ -86,24 +88,76 @@ class NotificationHelper(private val context: Context) {
         post(ID_CAPS, notification)
     }
 
-    fun notifyDigest(screenTimeMs: Long, topLabel: String?, topMs: Long) {
+    /**
+     * The daily digest — and, when the day has not been answered for, the nightly question.
+     *
+     * Tapping the notification opens the day's card, which is where the question is asked
+     * properly; the "Sort apps" action is offered only while there is a pile to sort, so a
+     * tidy user never sees an action with nothing behind it. Both targets are explicit
+     * [PendingIntent]s carrying a route extra rather than a URI scheme, which keeps the
+     * manifest free of an intent filter that would also let any other app deep-link in.
+     */
+    fun notifyDigest(
+        screenTimeMs: Long,
+        topLabel: String?,
+        topMs: Long,
+        askReflection: Boolean,
+        contentIntent: PendingIntent,
+        sortIntent: PendingIntent?,
+    ) {
         if (!canPost()) return
 
-        val body = if (topLabel != null && topMs > 0L) {
+        val roundedOff = if (topLabel != null && topMs > 0L) {
             "${DurationFormat.compact(screenTimeMs)} today, mostly $topLabel " +
                 "(${DurationFormat.compact(topMs)})."
         } else {
             "${DurationFormat.compact(screenTimeMs)} today."
         }
+        val body = if (askReflection) {
+            "$roundedOff Was today the day you wanted? Tap to answer."
+        } else {
+            roundedOff
+        }
 
-        val notification = base(CHANNEL_DIGEST)
+        val builder = base(CHANNEL_DIGEST)
             .setContentTitle("Your day, so far")
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-            .build()
+            .setContentIntent(contentIntent)
 
-        post(ID_DIGEST, notification)
+        if (sortIntent != null) {
+            builder.addAction(0, "Sort apps", sortIntent)
+        }
+
+        post(ID_DIGEST, builder.build())
+    }
+
+    /** The digest's tap target: the day card for [epochDay]. */
+    fun dayCardIntent(epochDay: Long): PendingIntent =
+        routeIntent(route = "day/$epochDay", requestCode = RC_DAY_CARD)
+
+    /** The digest's "Sort apps" action: the triage sheet. */
+    fun sortAppsIntent(): PendingIntent =
+        routeIntent(route = "triage", requestCode = RC_SORT_APPS)
+
+    /**
+     * Opens [MainActivity] and hands it a route to forward to the nav graph.
+     *
+     * [`FLAG_IMMUTABLE`] is required at this compileSdk, and the two callers use distinct
+     * request codes: a shared code would silently make the second intent overwrite the
+     * first, so the action would open the day card and the tap would do nothing.
+     */
+    private fun routeIntent(route: String, requestCode: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(MainActivity.EXTRA_ROUTE, route)
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     fun notifyMilestone(days: Int) {
@@ -187,6 +241,10 @@ class NotificationHelper(private val context: Context) {
         const val ID_STREAK = 1003
         const val ID_FOCUS = 1004
         const val ID_WATCH = 1005
+
+        /** Distinct so the digest's tap target and its action cannot overwrite each other. */
+        private const val RC_DAY_CARD = 1
+        private const val RC_SORT_APPS = 2
 
         /** Ember e600, the brand accent, used as the notification accent colour. */
         private const val COLOR_ACCENT = 0xFFD93B12.toInt()
