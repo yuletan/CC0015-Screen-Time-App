@@ -2,7 +2,6 @@ package com.intent.screentime.ui.triage
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.intent.screentime.data.category.TriageSuggestion
 import com.intent.screentime.data.local.DefaultCategories
 import com.intent.screentime.data.local.entity.CategoryEntity
 import com.intent.screentime.data.local.entity.CategoryKind
@@ -22,7 +21,6 @@ data class TriageItem(
     val totalMs: Long,
     val sessionCount: Int,
     val averageSessionMs: Long,
-    val suggestion: CategoryKind?,
     val currentCategoryId: String,
 )
 
@@ -104,7 +102,6 @@ class TriageViewModel(
                         totalMs = row.totalMs,
                         sessionCount = row.sessionCount,
                         averageSessionMs = average,
-                        suggestion = TriageSuggestion.of(row.sessionCount, average),
                         // Every app in this queue is here because its category is
                         // Uncategorised, so that is what undo restores it to.
                         currentCategoryId = DefaultCategories.UNCATEGORIZED,

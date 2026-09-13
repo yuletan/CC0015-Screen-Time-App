@@ -63,11 +63,18 @@ interface CategoryDao {
 
     /**
      * The triage queue: every app still sitting in [categoryId], ranked by how much it has
-     * been used since [fromDay].
+     * been used since [fromDay], and floored at [minTotalMs].
      *
      * A LEFT JOIN, so an app that was classified but never opened still appears — it is
      * exactly the kind of app a queue should clear out — and it sorts last because its
      * usage is zero.
+     *
+     * The floor matters more than it looks. Measured against a real 30-day window this
+     * table holds around 90 apps, and half of them are system components — permission
+     * controllers, intent resolvers, screenshot handlers — that accumulated seconds of
+     * use. Without a floor the queue is 57 cards long, which recreates the very chore
+     * triage exists to remove. Anything below the floor contributes nothing measurable to
+     * the producing/consuming split, so sorting it would be busywork.
      */
     @Query(
         "SELECT ac.packageName AS packageName, " +
@@ -76,11 +83,13 @@ interface CategoryDao {
             "FROM app_category ac LEFT JOIN daily_app_usage u " +
             "ON u.packageName = ac.packageName AND u.dayEpochDay >= :fromDay " +
             "WHERE ac.categoryId = :categoryId " +
-            "GROUP BY ac.packageName ORDER BY totalMs DESC, ac.packageName ASC",
+            "GROUP BY ac.packageName HAVING COALESCE(SUM(u.totalMs), 0) >= :minTotalMs " +
+            "ORDER BY totalMs DESC, ac.packageName ASC",
     )
     suspend fun unsortedWithUsage(
         categoryId: String,
         fromDay: Long,
+        minTotalMs: Long,
     ): List<UnsortedAppRow>
 
     @Upsert

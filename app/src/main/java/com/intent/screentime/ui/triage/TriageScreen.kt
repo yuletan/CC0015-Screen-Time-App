@@ -271,11 +271,6 @@ private fun QueueBody(
             }
         }
 
-        item.suggestion?.let { suggestion ->
-            Spacer(Modifier.height(Spacing.sm))
-            HintChip(kind = suggestion)
-        }
-
         Spacer(Modifier.height(Spacing.md))
 
         Row(
@@ -432,31 +427,6 @@ private fun evidenceLine(item: TriageItem): String {
         "$base · avg ${DurationFormat.compact(item.averageSessionMs)}"
     } else {
         base
-    }
-}
-
-/**
- * A suggestion, phrased as a hint.
- *
- * It is deliberately never an instruction: the rule behind it is narrow, and the app would
- * rather under-claim than tell the user what their own app is.
- */
-@Composable
-private fun HintChip(kind: CategoryKind) {
-    val tint = categoryColor(kind, dataColors)
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = tint.copy(alpha = 0.12f),
-    ) {
-        Text(
-            text = "Hint · lots of short sessions like these often turn out to be " +
-                "${kind.actionName()}. It is a guess, not an instruction.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(Spacing.sm),
-        )
     }
 }
 

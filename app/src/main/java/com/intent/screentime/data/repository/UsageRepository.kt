@@ -274,12 +274,20 @@ class UsageRepository(
 
     // --- triage ------------------------------------------------------------
 
-    /** Every app still unsorted, ranked by usage over the window. */
+    /**
+     * Every app still unsorted, ranked by usage over the window.
+     *
+     * Floored at [MIN_QUEUE_TOTAL_MS] because a queue that includes every system component
+     * that ever accumulated a few seconds is not a queue, it is the same backlog the
+     * feature was built to clear.
+     */
     suspend fun unsortedQueue(
         fromDay: Long = DayWindow.todayEpochDay() - TRIAGE_LOOKBACK_DAYS,
+        minTotalMs: Long = MIN_QUEUE_TOTAL_MS,
     ): List<UnsortedAppRow> = database.categoryDao().unsortedWithUsage(
         categoryId = DefaultCategories.UNCATEGORIZED,
         fromDay = fromDay,
+        minTotalMs = minTotalMs,
     )
 
     /** Re-harvests from the OS. Called when a screen opens, so the day is never stale. */
@@ -313,5 +321,8 @@ class UsageRepository(
 
         /** How far back the triage queue looks to rank apps by how much they matter. */
         const val TRIAGE_LOOKBACK_DAYS = 30L
+
+        /** Below a minute across the window, an app cannot move the split either way. */
+        const val MIN_QUEUE_TOTAL_MS = 60_000L
     }
 }
