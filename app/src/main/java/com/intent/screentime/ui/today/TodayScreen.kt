@@ -3,6 +3,7 @@ package com.intent.screentime.ui.today
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,7 +129,7 @@ fun TodayScreen(
 
         item {
             EnterAnimation(index = 1) {
-                SplitPanel(state = state)
+                SplitPanel(state = state, onOpenTriage = onOpenTriage)
             }
         }
 
@@ -346,7 +347,7 @@ private fun StatusPill(icon: ImageVector, text: String, tint: androidx.compose.u
 }
 
 @Composable
-private fun SplitPanel(state: TodayUiState) {
+private fun SplitPanel(state: TodayUiState, onOpenTriage: () -> Unit) {
     val data = dataColors
 
     val segments = listOf(
@@ -379,6 +380,50 @@ private fun SplitPanel(state: TodayUiState) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        if (state.unsortedCount > 0) {
+            Spacer(Modifier.height(Spacing.xs))
+            UnsortedRow(
+                count = state.unsortedCount,
+                ms = state.unsortedMs,
+                onClick = onOpenTriage,
+            )
+        }
+    }
+}
+
+/**
+ * Today's unsorted pile, offered as a way to clear it.
+ *
+ * The split can read a misleading low simply because nothing is categorised, so this says
+ * how much time that is and offers the fix in place, rather than describing the problem and
+ * sending the user elsewhere.
+ */
+@Composable
+private fun UnsortedRow(count: Int, ms: Long, onClick: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "${DurationFormat.compact(ms)} unsorted across " +
+                    (if (count == 1) "1 app" else "$count apps") + " — sort",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 

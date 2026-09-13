@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -97,18 +99,43 @@ fun AppsScreen(
 
         if (state.uncategorisedCount > 0) {
             item {
+                // An invitation, not an explanation. The old copy told the user to go and
+                // sort somewhere else; this one is the somewhere else.
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onSortCategories),
                 ) {
-                    Text(
-                        text = "Tap an app to see its month, set a cap or sort its category. " +
-                            "Producing and consuming are what the split on the Today screen " +
-                            "is built from.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Row(
                         modifier = Modifier.padding(Spacing.sm),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Sort your apps",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = (if (state.uncategorisedCount == 1) {
+                                    "1 app"
+                                } else {
+                                    "${state.uncategorisedCount} apps"
+                                }) + " still have no side. Producing and consuming are what " +
+                                    "the split on Today is built from — give each one a side " +
+                                    "and it starts meaning something.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Filled.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
         }
