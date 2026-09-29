@@ -10,3 +10,12 @@ build/
 local.properties
 .kotlin
 .worktrees
+
+# CC0015 assignment material
+/CC0015/
+/CC0015_IA_scaffold.docx
+/cc15.md
+/doc.md
+/direction.md
+/CC15_*.md
+/CC15_*.pdf
