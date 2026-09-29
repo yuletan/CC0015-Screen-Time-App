@@ -37,7 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.data.local.entity.CategoryKind
-import com.intent.screentime.ui.apps.label
+import com.intent.screentime.ui.components.displayLabel
 import com.intent.screentime.ui.components.SectionEyebrow
 import com.intent.screentime.ui.theme.Spacing
 import com.intent.screentime.ui.theme.toComposeColor
@@ -134,8 +134,15 @@ fun CategoryEditorScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            text = "${row.category.kind.label()} · " +
-                                if (row.appCount == 1) "1 app" else "${row.appCount} apps",
+                            text = (if (row.category.id == "uncategorized") {
+                                "Not sorted"
+                            } else {
+                                row.category.kind.displayLabel()
+                            }) + " · " + if (row.appCount == 1) {
+                                "1 app"
+                            } else {
+                                "${row.appCount} apps"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -234,7 +241,7 @@ private fun CategoryDialog(
                             modifier = Modifier.clickable { kind = option },
                         ) {
                             Text(
-                                text = option.label(),
+                                text = option.displayLabel(),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (selected) {
                                     MaterialTheme.colorScheme.onPrimary

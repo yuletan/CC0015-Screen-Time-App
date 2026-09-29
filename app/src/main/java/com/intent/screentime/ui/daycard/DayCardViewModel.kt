@@ -3,14 +3,19 @@ package com.intent.screentime.ui.daycard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.intent.screentime.core.time.DayWindow
-import com.intent.screentime.data.local.entity.CategoryKind
 import com.intent.screentime.data.local.entity.DailyAppUsageEntity
 import com.intent.screentime.data.local.entity.DailySummaryEntity
 import com.intent.screentime.data.local.entity.DayNoteEntity
 import com.intent.screentime.data.local.entity.DayReflection
+import com.intent.screentime.data.goals.GoalTargets
+import com.intent.screentime.data.goals.ScoreWindow
 import com.intent.screentime.data.local.entity.IntentLogEntity
 import com.intent.screentime.data.local.entity.StreakDayEntity
+import com.intent.screentime.data.repository.AppCategoryRef
 import com.intent.screentime.data.repository.UsageRepository
+import com.intent.screentime.data.stats.UsageSplit
+import com.intent.screentime.data.usage.BedtimeWindow
+import com.intent.screentime.data.usage.HourlyBreakdown
 import com.intent.screentime.ui.apps.AppInfoProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,32 +33,50 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-data class DayAppRow(val packageName: String, val totalMs: Long, val sessionCount: Int)
+/** One app's share of the day, with the kind of time it took resolved for the row. */
+data class DayAppRow(
+    val packageName: String,
+    val totalMs: Long,
+    val sessionCount: Int,
+    val category: AppCategoryRef? = null,
+)
 
 data class DayCardUiState(
     val loading: Boolean = true,
     val epochDay: Long = 0L,
     val screenTimeMs: Long = 0L,
-    val productionMs: Long = 0L,
-    val consumptionMs: Long = 0L,
-    val utilityMs: Long = 0L,
-    val neutralMs: Long = 0L,
+    /** The day's time by kind: Producing, Consuming, Utility, Neutral and Unsorted. */
+    val split: UsageSplit = UsageSplit(),
+    /**
+     * The day's Intent Score, computed from the day's own numbers by the same code the
+     * Today screen and the Insights window use, so all three agree on what a day scored.
+     */
+    val score: ScoreWindow.Result? = null,
+    /**
+     * The cap a single day was judged against — a daily cap, or a seventh of a weekly one.
+     * Carried so the score's cap row can say what it was measured against.
+     */
+    val capMinutes: Int? = null,
     val focusMs: Long = 0L,
+    /** How much of [focusMs] the stretch detector found rather than the timer. */
+    val autoFocusMs: Long = 0L,
     val unlockCount: Int = 0,
     val topApps: List<DayAppRow> = emptyList(),
     val appCount: Int = 0,
+    val buckets: List<HourlyBreakdown.Bucket> = emptyList(),
     val verdict: StreakDayEntity? = null,
     val intents: List<IntentLogEntity> = emptyList(),
     val note: String = "",
     val reflection: DayReflection? = null,
+    /**
+     * The bedtime window as it stands today, or null if none is set. Carried so the card
+     * can describe the night without pretending every historical day had one.
+     */
+    val bedtimeWindow: BedtimeWindow? = null,
 ) {
     val hasData: Boolean get() = screenTimeMs > 0L
 
-    val productionShare: Float
-        get() {
-            val accountable = productionMs + consumptionMs
-            return if (accountable <= 0L) 0f else productionMs.toFloat() / accountable
-        }
+    val productionShare: Float get() = split.productionShare
 
     /** Prompts the user actually answered, as opposed to ones they let close. */
     val promptsAnswered: Int get() = intents.count { !it.skipped }
@@ -142,61 +165,54 @@ class DayCardViewModel(
     ): DayCardUiState {
         val categories = repository.categoryLookup()
 
-        // The same fold the Today board uses, so a day's four-way split never disagrees
-        // with itself depending on which screen is asking.
-        var production = 0L
-        var consumption = 0L
-        var utility = 0L
-        var neutral = 0L
-        for (row in appUsage) {
-            when (categories[row.packageName]?.kind) {
-                CategoryKind.PRODUCTION -> production += row.totalMs
-                CategoryKind.CONSUMPTION -> consumption += row.totalMs
-                CategoryKind.UTILITY -> utility += row.totalMs
-                CategoryKind.NEUTRAL, null -> neutral += row.totalMs
-            }
-        }
+        val split = UsageSplit.from(appUsage, categories)
 
         val topApps = appUsage.take(TOP_APP_LIMIT).map { row ->
             DayAppRow(
                 packageName = row.packageName,
                 totalMs = row.totalMs,
                 sessionCount = row.sessionCount,
+                category = categories[row.packageName],
             )
         }
         appInfo.preload(topApps.map { it.packageName })
+
+        // One read of the day verdicts either side of this day: the row for the day itself,
+        // and the rows the streak it was on was counted from.
+        val targets = GoalTargets.from(repository.enabledTargets())
+        val streakRows = repository.streakRowsBetween(epochDay - STREAK_LOOKBACK, epochDay)
 
         return DayCardUiState(
             loading = false,
             epochDay = epochDay,
             screenTimeMs = summary?.screenTimeMs ?: 0L,
-            productionMs = production,
-            consumptionMs = consumption,
-            utilityMs = utility,
-            neutralMs = neutral,
+            split = split,
+            score = ScoreWindow.of(
+                ScoreWindow.inputs(
+                    summaries = listOfNotNull(summary),
+                    targets = targets,
+                    streakRows = streakRows,
+                    todayEpochDay = DayWindow.todayEpochDay(),
+                ),
+            ),
+            capMinutes = targets.dailyCapMinutes
+                ?: targets.weeklyCapMinutes?.let { it / 7 },
             focusMs = summary?.focusMs ?: 0L,
+            autoFocusMs = summary?.autoFocusMs ?: 0L,
             unlockCount = summary?.unlockCount ?: 0,
             topApps = topApps,
             appCount = appUsage.size,
-            verdict = verdictFor(),
+            buckets = repository.hourlyBuckets(epochDay),
+            verdict = streakRows.firstOrNull { it.dayEpochDay == epochDay },
             intents = repository.intentLogsBetween(
                 DayWindow.startOfDayMs(epochDay),
                 DayWindow.endOfDayMs(epochDay),
             ),
             note = note?.note.orEmpty(),
             reflection = DayReflection.fromKey(note?.reflection),
+            bedtimeWindow = targets.bedtime,
         )
     }
-
-    /**
-     * The verdict the nightly pass recorded for this day.
-     *
-     * Read out of the recent rows rather than a dedicated by-day query: the heatmap only
-     * ever opens the last twelve weeks, so a lookback of [STREAK_LOOKBACK] always contains
-     * the day, and it keeps this screen on the repository's existing read surface.
-     */
-    private suspend fun verdictFor(): StreakDayEntity? =
-        repository.recentStreakRows(STREAK_LOOKBACK).firstOrNull { it.dayEpochDay == epochDay }
 
     /**
      * Records what the user is typing, immediately and then lazily.
@@ -241,10 +257,12 @@ class DayCardViewModel(
     private class ReflectionChoice(val value: DayReflection?)
 
     private companion object {
-        const val TOP_APP_LIMIT = 3
+        /** The card shows the same five apps the Today screen does. */
+        const val TOP_APP_LIMIT = 5
+
         const val NOTE_DEBOUNCE_MS = 400L
 
         /** Comfortably longer than the twelve weeks the heatmap can point at. */
-        const val STREAK_LOOKBACK = 120
+        const val STREAK_LOOKBACK = 120L
     }
 }

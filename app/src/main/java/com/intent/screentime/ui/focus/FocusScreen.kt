@@ -122,7 +122,9 @@ fun FocusScreen(
                         icon = Icons.Filled.Timer,
                         title = "No sessions yet",
                         body = "A focus session is a stretch of time you claim for one " +
-                            "thing. Completed minutes count towards your day and your goal.",
+                            "thing. Completed minutes count towards your day and your goal — " +
+                            "and so do long uninterrupted stretches in your work apps, even " +
+                            "without a timer.",
                     )
                 }
             }
@@ -298,6 +300,18 @@ private fun TodayPanel(state: FocusUiState, onSetGoal: () -> Unit) {
                 )
             }
         }
+
+        // Focus that arrived without a timer would otherwise look like a bug: the ring
+        // says "focused" and the user never pressed start. Say where it came from.
+        if (state.autoFocusMs > 0L) {
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                text = "${DurationFormat.compact(state.autoFocusMs)} of today's focus was " +
+                    "detected from long uninterrupted stretches in your work apps.",
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -410,7 +424,8 @@ private fun GoalDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 Text(
-                    text = "Completed sessions count towards this, and so does the score.",
+                    text = "Completed sessions count towards this, and so do detected " +
+                        "stretches in your work apps. Both feed the score.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

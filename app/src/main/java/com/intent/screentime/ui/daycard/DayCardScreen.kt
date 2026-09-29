@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EventBusy
@@ -40,18 +41,24 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
+import com.intent.screentime.core.format.HourFormat
+import com.intent.screentime.data.goals.IntentScore
 import com.intent.screentime.data.intent.Reasons
 import com.intent.screentime.data.local.entity.DayReflection
 import com.intent.screentime.data.local.entity.IntentLogEntity
-import com.intent.screentime.data.local.entity.StreakDayEntity
 import com.intent.screentime.ui.apps.AppInfoProvider
-import com.intent.screentime.ui.components.AppIcon
+import com.intent.screentime.ui.components.CapturablePanel
 import com.intent.screentime.ui.components.EmptyState
+import com.intent.screentime.ui.components.HourlyStrip
+import com.intent.screentime.ui.components.IntentScorePanel
 import com.intent.screentime.ui.components.Panel
+import com.intent.screentime.ui.components.ProducingVsConsumingPanel
+import com.intent.screentime.ui.components.RankedAppRow
+import com.intent.screentime.ui.components.ScoreDetail
 import com.intent.screentime.ui.components.SectionEyebrow
-import com.intent.screentime.ui.components.SplitBar
-import com.intent.screentime.ui.components.SplitSegment
 import com.intent.screentime.ui.components.StatTile
+import com.intent.screentime.ui.components.busiestHour
+import com.intent.screentime.ui.components.pointsText
 import com.intent.screentime.ui.theme.Spacing
 import com.intent.screentime.ui.theme.dataColors
 import java.time.Instant
@@ -115,8 +122,9 @@ fun DayCardScreen(
         }
 
         if (state.hasData) {
-            item { VerdictPanel(state.verdict) }
+            item { ScorePanel(state) }
             item { SplitPanel(state) }
+            item { TimelinePanel(state, appInfo) }
             if (state.topApps.isNotEmpty()) {
                 item { TopAppsPanel(state.topApps, appInfo) }
             }
@@ -279,123 +287,234 @@ private fun ReflectionChip(label: String, selected: Boolean, onClick: () -> Unit
 }
 
 /**
- * The verdict, said plainly.
+ * The day's score, and the verdict that used to be its own panel.
+ *
+ * The ring and the five rows come from the shared panel, so this day reads the same here, on
+ * the Today screen when it *was* today, and inside the Insights window it now falls in. What
+ * stays on this card is the prose: whether the cap and the goal were met, and what the night
+ * did — the parts that are a story about this day rather than arithmetic.
  *
  * A day over the cap is described, not condemned: the point of the card is to know what
  * happened, and a screen that shouts about yesterday teaches nothing except to avoid it.
  */
 @Composable
-private fun VerdictPanel(verdict: StreakDayEntity?) {
-    val scheme = MaterialTheme.colorScheme
-    val data = dataColors
+private fun ScorePanel(state: DayCardUiState) {
+    val score = state.score ?: return
 
-    Panel(title = "The verdict") {
-        if (verdict == null) {
-            Text(
-                text = "This day was never judged.",
-                style = MaterialTheme.typography.titleSmall,
-                color = scheme.onSurface,
+    IntentScorePanel(
+        score = score.score,
+        verdict = when {
+            score.score >= 70 -> "A day worth repeating."
+            score.score >= 45 -> "A mixed day — the split was doing the work."
+            else -> "Consumption had the run of it."
+        },
+        explanation = verdictSentence(state),
+        contributions = score.contributions,
+        details = score.contributions.map { contribution ->
+            ScoreDetail(
+                kind = contribution.kind,
+                tone = contribution.tone,
+                text = scoreDetailText(state, contribution.kind),
+                pointsText = contribution.pointsText(),
             )
-            Text(
-                text = "The nightly pass writes a verdict once a day is over. Days before " +
-                    "tracking began are left alone.",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
-            return@Panel
+        },
+        fileName = "day-intent-score",
+        footnote = state.verdict?.let { verdict ->
+            "${DurationFormat.compact(verdict.productionMs)} producing that day"
+        },
+    )
+}
+
+/**
+ * What the day did against the commitments that were live at the time.
+ *
+ * Falls back to the numbers rather than to silence: a day is judged from its own data even
+ * when the nightly pass has not written a row for it, so the card never has to say "never
+ * judged" about a day it can perfectly well describe.
+ */
+private fun verdictSentence(state: DayCardUiState): String {
+    val verdict = state.verdict
+
+    val goal = when {
+        verdict == null -> ""
+        verdict.metCap && verdict.metGoal ->
+            " Inside your cap, with the producing time you wanted."
+        verdict.metCap -> " Inside your cap, though the producing goal went unmet."
+        else -> " Screen time ran past your cap that day."
+    }
+
+    val bedtime = state.bedtimeWindow?.let { window ->
+        val hours = "${DurationFormat.timeOfDay(window.startMinutesOfDay)}–" +
+            DurationFormat.timeOfDay(window.endMinutesOfDay)
+        val used = verdict?.bedtimeUsedMs ?: 0L
+        when {
+            verdict == null -> ""
+            !verdict.metBedtime ->
+                " ${DurationFormat.compact(used)} landed inside the $hours bedtime window."
+            used <= 0L -> " The $hours bedtime window was clear."
+            else -> " Only ${DurationFormat.compact(used)} landed inside the $hours window."
+        }
+    }.orEmpty()
+
+    return "Computed from that day's own numbers, against the commitments that were live " +
+        "then.$goal$bedtime"
+}
+
+/** The plain-language reason behind one row, from this day's own numbers. */
+private fun scoreDetailText(
+    state: DayCardUiState,
+    kind: IntentScore.ContributionKind,
+): String {
+    val split = state.split
+    val score = state.score
+
+    return when (kind) {
+        IntentScore.ContributionKind.PRODUCTION ->
+            if (split.accountableMs <= 0L) {
+                "Nothing was categorised as Producing or Consuming that day."
+            } else {
+                "${(split.productionShare * 100).toInt()}% of that day's categorised time " +
+                    "was Producing."
+            }
+
+        IntentScore.ContributionKind.CAP -> {
+            val capMinutes = state.capMinutes
+            val capMs = capMinutes?.toLong()?.times(60_000L)
+            when {
+                capMs == null -> "No daily cap was set, so this part stays neutral."
+                state.screenTimeMs > capMs ->
+                    "${DurationFormat.compact(state.screenTimeMs - capMs)} over your " +
+                        "${DurationFormat.compact(capMs)} cap."
+
+                else -> "${DurationFormat.compact(capMs - state.screenTimeMs)} left before " +
+                    "your cap."
+            }
         }
 
-        Text(
-            text = when {
-                verdict.metCap && verdict.metGoal ->
-                    "Inside your cap, with the producing time you wanted."
-                verdict.metCap ->
-                    "Inside your cap. The producing goal went unmet that day."
-                else ->
-                    "Screen time ran past your cap that day."
-            },
-            style = MaterialTheme.typography.titleSmall,
-            color = scheme.onSurface,
-        )
-        Text(
-            text = when {
-                verdict.score >= 70 -> "A day worth repeating."
-                verdict.score >= 45 -> "A mixed day — the split was doing the work."
-                else -> "Consumption had the run of it."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = scheme.onSurfaceVariant,
-        )
-        Text(
-            text = "Scored ${verdict.score} of 100 · " +
-                "${DurationFormat.compact(verdict.productionMs)} producing",
-            style = MaterialTheme.typography.labelSmall,
-            color = data.production,
-        )
+        IntentScore.ContributionKind.BEDTIME -> {
+            val window = state.bedtimeWindow
+            val used = state.verdict?.bedtimeUsedMs ?: 0L
+            when {
+                window == null -> "No bedtime was set, so this part stays neutral."
+                state.verdict == null ->
+                    "The stored verdict for that day was not kept, so this part stays neutral."
+
+                state.verdict.metBedtime -> "Bedtime held — ${DurationFormat.compact(used)} " +
+                    "inside the ${DurationFormat.timeOfDay(window.startMinutesOfDay)}–" +
+                    "${DurationFormat.timeOfDay(window.endMinutesOfDay)} window."
+
+                else -> "${DurationFormat.compact(used)} inside your bedtime window. Under " +
+                    "five minutes keeps the night."
+            }
+        }
+
+        IntentScore.ContributionKind.FOCUS ->
+            if (state.focusMs > 0L) {
+                "${DurationFormat.compact(state.focusMs)} focused that day; one hour earns " +
+                    "full credit."
+            } else {
+                "No focused time recorded that day."
+            }
+
+        IntentScore.ContributionKind.STREAK -> {
+            val days = score?.longestStreak ?: 0
+            if (days <= 0) {
+                "No consecutive days inside your cap by then."
+            } else {
+                "$days consecutive days inside your cap by then."
+            }
+        }
     }
 }
 
+/**
+ * That day against the split, in this card's own words.
+ *
+ * The rendering is the shared panel, so a past day, today and a whole window cannot answer
+ * "did I spend this time or did it spend me" in three different shapes. The unsorted offer
+ * stays off here: this card is about a day that is already over.
+ */
 @Composable
 private fun SplitPanel(state: DayCardUiState) {
-    val data = dataColors
+    ProducingVsConsumingPanel(
+        split = state.split,
+        fileName = "day-split",
+        prose = when {
+            state.split.accountableMs <= 0L ->
+                "Not enough categorised time that day. Sort your apps and the past " +
+                    "starts meaning something too."
 
-    val segments = listOf(
-        SplitSegment("Producing", state.productionMs, data.production),
-        SplitSegment("Consuming", state.consumptionMs, data.consumption),
-        SplitSegment("Utility", state.utilityMs, data.utility),
-        SplitSegment("Unsorted", state.neutralMs, data.neutral),
+            state.productionShare >= 0.25f ->
+                "${(state.productionShare * 100).toInt()}% of that day's categorised time " +
+                    "went into producing rather than consuming."
+
+            else ->
+                "${(state.productionShare * 100).toInt()}% of that day's categorised time " +
+                    "went into producing. Utility and unsorted time is deliberately left " +
+                    "out of this ratio."
+        },
     )
-
-    Panel(title = "Producing vs consuming") {
-        SplitBar(segments = segments)
-
-        Spacer(Modifier.height(Spacing.xs))
-
-        Text(
-            text = when {
-                state.productionMs == 0L && state.consumptionMs == 0L ->
-                    "Not enough categorised time that day. Sort your apps and the past " +
-                        "starts meaning something too."
-
-                state.productionShare >= 0.25f ->
-                    "${(state.productionShare * 100).toInt()}% of that day's categorised time " +
-                        "went into producing rather than consuming."
-
-                else ->
-                    "${(state.productionShare * 100).toInt()}% of that day's categorised time " +
-                        "went into producing. Utility and unsorted time is deliberately left " +
-                        "out of this ratio."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
 }
 
+/**
+ * The shape of the day, hour by hour.
+ *
+ * The same strip Today draws, from the same sessions: a past day read as a total and a
+ * past day read as a timeline are different days, and only one of them is true.
+ */
 @Composable
-private fun TopAppsPanel(rows: List<DayAppRow>, appInfo: AppInfoProvider) {
-    Panel(title = "Where most of it went") {
-        rows.forEach { row ->
+private fun TimelinePanel(state: DayCardUiState, appInfo: AppInfoProvider) {
+    val peak = busiestHour(state.buckets)
+
+    Panel(title = "The shape of that day") {
+        HourlyStrip(buckets = state.buckets, labelOf = appInfo::label)
+
+        if (peak != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
-                AppIcon(packageName = row.packageName, provider = appInfo, size = 36.dp)
-                Text(
-                    text = appInfo.label(row.packageName),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                Icon(
+                    Icons.Filled.Bolt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
                 )
                 Text(
-                    text = DurationFormat.compact(row.totalMs),
-                    style = MaterialTheme.typography.labelLarge,
+                    text = "Busiest stretch was ${HourFormat.short(peak.hour)} " +
+                        "at ${DurationFormat.compact(peak.totalMs)}",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Where most of the day went, one row each, every row carrying the kind of time it took.
+ *
+ * The shared ranked row rather than a private list, so an app reads the same here as it does
+ * on Today and in Insights — same icon, same chip, same bar, same tap target.
+ */
+@Composable
+private fun TopAppsPanel(rows: List<DayAppRow>, appInfo: AppInfoProvider) {
+    val data = dataColors
+    val maxMs = rows.maxOfOrNull { it.totalMs } ?: 0L
+
+    CapturablePanel(title = "Where most of it went", fileName = "day-top-apps") {
+        rows.forEachIndexed { index, row ->
+            RankedAppRow(
+                packageName = row.packageName,
+                name = appInfo.label(row.packageName),
+                valueMs = row.totalMs,
+                maxMs = maxMs,
+                appInfo = appInfo,
+                color = data.series[index % data.series.size],
+                onClick = {},
+                category = row.category,
+            )
         }
     }
 }
@@ -424,6 +543,16 @@ private fun VitalsRow(state: DayCardUiState) {
                 caption = "prompts answered",
                 icon = Icons.Filled.Chat,
                 tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        if (state.autoFocusMs > 0L) {
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                text = "${DurationFormat.compact(state.autoFocusMs)} of that day's focus was " +
+                    "detected from long uninterrupted stretches in your work apps.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

@@ -504,5 +504,5 @@ private fun CategoryKind.actionName(): String = when (this) {
     CategoryKind.PRODUCTION -> "Producing"
     CategoryKind.CONSUMPTION -> "Consuming"
     CategoryKind.UTILITY -> "Utility"
-    CategoryKind.NEUTRAL -> "Either"
+    CategoryKind.NEUTRAL -> "Neutral"
 }

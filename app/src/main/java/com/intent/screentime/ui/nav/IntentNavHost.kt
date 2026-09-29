@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -122,16 +123,7 @@ fun IntentNavHost(
                 Destination.entries.forEach { destination ->
                     NavigationBarItem(
                         selected = currentRoute == destination.route,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                // Single-instance tabs that remember their scroll position.
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
+                        onClick = { navController.switchTab(destination.route) },
                         icon = {
                             Icon(destination.icon, contentDescription = destination.label)
                         },
@@ -149,7 +141,11 @@ fun IntentNavHost(
             composable(Destination.Today.route) {
                 val vm: TodayViewModel = viewModel(
                     factory = IntentViewModelFactory {
-                        TodayViewModel(container.usageRepository, container.appInfoProvider)
+                        TodayViewModel(
+                            repository = container.usageRepository,
+                            appInfo = container.appInfoProvider,
+                            excludedPackages = container.excludedPackages,
+                        )
                     },
                 )
                 val state by vm.state.collectAsStateWithLifecycle()
@@ -207,8 +203,14 @@ fun IntentNavHost(
                     state = state,
                     appInfo = container.appInfoProvider,
                     onBack = { navController.popBackStack() },
+                    onSelectRange = vm::setRange,
+                    onPreviousWindow = vm::showPrevious,
+                    onNextWindow = vm::showNext,
                     onSetCap = vm::setCap,
                     onSetCategory = vm::setCategory,
+                    onOpenDay = { epochDay ->
+                        navController.navigate("$DAY_CARD_ROUTE/$epochDay")
+                    },
                 )
             }
 
@@ -236,7 +238,7 @@ fun IntentNavHost(
             composable(Destination.Goals.route) {
                 val vm: GoalsViewModel = viewModel(
                     factory = IntentViewModelFactory {
-                        GoalsViewModel(container.usageRepository)
+                        GoalsViewModel(container.usageRepository, container.goalTracker)
                     },
                 )
                 val state by vm.state.collectAsStateWithLifecycle()
@@ -244,6 +246,7 @@ fun IntentNavHost(
                 GoalsScreen(
                     state = state,
                     onSetTarget = vm::setTarget,
+                    onSetBedtime = vm::setBedtime,
                     onOpenDay = { epochDay ->
                         navController.navigate("$DAY_CARD_ROUTE/$epochDay")
                     },
@@ -295,12 +298,46 @@ fun IntentNavHost(
             composable(Destination.Insights.route) {
                 val vm: InsightsViewModel = viewModel(
                     factory = IntentViewModelFactory {
-                        InsightsViewModel(container.usageRepository, container.appInfoProvider)
+                        InsightsViewModel(
+                            container.usageRepository,
+                            container.appInfoProvider,
+                            container.periodExporter,
+                        )
                     },
                 )
                 val state by vm.state.collectAsStateWithLifecycle()
+                val exporting by vm.exporting.collectAsStateWithLifecycle()
+                val export by vm.exportUri.collectAsStateWithLifecycle()
+                val context = LocalContext.current
 
-                InsightsScreen(state = state, onSelectRange = vm::setRange)
+                LaunchedEffect(export) {
+                    val (uri, name) = export ?: return@LaunchedEffect
+                    context.startActivity(
+                        com.intent.screentime.data.export.PeriodExporter.chooserFor(
+                            uri = uri,
+                            fileName = name,
+                            title = "Download period ($name)",
+                        ),
+                    )
+                    vm.clearExport()
+                }
+
+                InsightsScreen(
+                    state = state,
+                    appInfo = container.appInfoProvider,
+                    onSelectRange = vm::setRange,
+                    onPreviousWindow = vm::showPrevious,
+                    onNextWindow = vm::showNext,
+                    onOpenApp = { packageName ->
+                        navController.navigate("$APP_DETAIL_ROUTE/$packageName")
+                    },
+                    onOpenDay = { epochDay ->
+                        navController.navigate("$DAY_CARD_ROUTE/$epochDay")
+                    },
+                    onOpenTriage = { navController.navigate(TRIAGE_ROUTE) },
+                    exporting = exporting,
+                    onExport = vm::exportCurrentWindow,
+                )
             }
 
             composable(SETTINGS_ROUTE) {
@@ -310,28 +347,42 @@ fun IntentNavHost(
                             repository = container.usageRepository,
                             preferences = container.preferences,
                             csvExporter = container.csvExporter,
+                            periodExporter = container.periodExporter,
+                            goalTracker = container.goalTracker,
                             onDigestTimeChanged = container::rescheduleDigest,
                         )
                     },
                 )
                 val capMinutes by vm.capMinutes.collectAsStateWithLifecycle()
+                val bedtime by vm.bedtime.collectAsStateWithLifecycle()
+                val bedtimeNudge by vm.bedtimeNudge.collectAsStateWithLifecycle()
                 val busy by vm.busy.collectAsStateWithLifecycle()
                 val digestMinutes by vm.digestMinutes.collectAsStateWithLifecycle()
                 val exportUri by vm.exportUri.collectAsStateWithLifecycle()
+                val periodZip by vm.periodZip.collectAsStateWithLifecycle()
+                val periodBusy by vm.periodBusy.collectAsStateWithLifecycle()
 
                 var showCapDialog by remember { mutableStateOf(false) }
 
                 SettingsScreen(
                     dynamicColor = dynamicColor,
                     capMinutes = capMinutes,
+                    bedtime = bedtime,
+                    bedtimeNudge = bedtimeNudge,
                     busy = busy,
                     digestMinutes = digestMinutes,
                     exportUri = exportUri,
+                    periodZip = periodZip,
+                    periodBusy = periodBusy,
+                    onBack = { navController.popBackStack() },
                     onDynamicColorChange = onDynamicColorChange,
                     onSetCap = { showCapDialog = true },
+                    onSetBedtime = vm::setBedtime,
                     onSetDigestTime = vm::setDigestMinutes,
                     onExportCsv = vm::exportCsv,
                     onExportConsumed = vm::clearExport,
+                    onExportPeriod = vm::exportPeriod,
+                    onPeriodConsumed = vm::clearPeriodZip,
                     onOpenCategories = { navController.navigate(CATEGORY_EDITOR_ROUTE) },
                     onOpenIntentPrompt = { navController.navigate(INTENT_PROMPT_ROUTE) },
                     onRefreshNow = vm::refreshNow,
@@ -430,5 +481,24 @@ fun IntentNavHost(
                 )
             }
         }
+    }
+}
+
+/**
+ * Opens a tab, keeping the state of the tabs that were left behind.
+ *
+ * `restoreState` is left off when the tab being opened is the graph's start destination,
+ * and that exemption is the whole point of this helper. A non-inclusive `popUpTo` maps
+ * whatever it saved onto the destination it popped up to as well as onto the entries it
+ * popped; when the start destination is also the one being navigated to, the restore hands
+ * back the entries the same call just popped — so tapping "Today" from Settings would
+ * restore Settings and the screen would not move.
+ */
+private fun NavHostController.switchTab(route: String) {
+    val start = graph.findStartDestination()
+    navigate(route) {
+        popUpTo(start.id) { saveState = true }
+        launchSingleTop = true
+        restoreState = start.route != route
     }
 }

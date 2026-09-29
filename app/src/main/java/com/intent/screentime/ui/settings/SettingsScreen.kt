@@ -11,9 +11,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -28,25 +32,38 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
+import com.intent.screentime.data.goals.BedtimeNudge
+import com.intent.screentime.data.usage.BedtimeWindow
+import com.intent.screentime.ui.components.BedtimeDialog
 import com.intent.screentime.ui.components.Panel
 import com.intent.screentime.ui.components.SectionEyebrow
 import com.intent.screentime.ui.theme.Spacing
+import com.intent.screentime.ui.theme.dataColors
 
 @Composable
 fun SettingsScreen(
     dynamicColor: Boolean,
     capMinutes: Int?,
+    bedtime: BedtimeWindow?,
+    bedtimeNudge: BedtimeNudge,
     busy: Boolean,
     digestMinutes: Int,
     exportUri: Uri?,
+    periodZip: Pair<Uri, String>? = null,
+    periodBusy: Boolean = false,
+    onBack: () -> Unit,
     onDynamicColorChange: (Boolean) -> Unit,
     onSetCap: () -> Unit,
+    onSetBedtime: (Int?, Int?) -> Unit,
     onSetDigestTime: (Int) -> Unit,
     onExportCsv: () -> Unit,
     onExportConsumed: () -> Unit,
+    onExportPeriod: (Long) -> Unit = {},
+    onPeriodConsumed: () -> Unit = {},
     onOpenCategories: () -> Unit,
     onOpenIntentPrompt: () -> Unit,
     onRefreshNow: () -> Unit,
@@ -55,6 +72,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var showDigestDialog by remember { mutableStateOf(false) }
+    var showBedtimeDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     // The export result is handed to whatever the user picks, then forgotten: nothing
@@ -71,6 +89,19 @@ fun SettingsScreen(
         onExportConsumed()
     }
 
+    // A finished Day / Week / Month zip: csv/ + photos/ + insights.md, shared once.
+    LaunchedEffect(periodZip) {
+        val (uri, name) = periodZip ?: return@LaunchedEffect
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/zip"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "CC0015 Intent export ($name)")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Download period ($name)"))
+        onPeriodConsumed()
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(
@@ -82,13 +113,22 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
         item {
-            Column {
-                SectionEyebrow("Preferences")
-                Text(
-                    text = "Settings",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Column {
+                    SectionEyebrow("Preferences")
+                    Text(
+                        text = "Settings",
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
         }
 
@@ -100,6 +140,18 @@ fun SettingsScreen(
                         ?: "No cap set",
                     actionLabel = if (capMinutes == null) "Set" else "Change",
                     onAction = onSetCap,
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsAction(
+                    title = "Bedtime",
+                    detail = bedtimeDetail(bedtime, bedtimeNudge),
+                    detailTint = if (bedtime != null && bedtimeNudge.repeated) {
+                        dataColors.watchful
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    actionLabel = if (bedtime == null) "Set" else "Change",
+                    onAction = { showBedtimeDialog = true },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsAction(
@@ -191,6 +243,43 @@ fun SettingsScreen(
         }
 
         item {
+            Panel(title = "Download period (ZIP)") {
+                Text(
+                    text = "One file with two folders: csv/ (daily + weekly numbers, " +
+                        "apps, prompts) and photos/ (chart images named by date). " +
+                        "A week carries its 7 daily photos plus weekly charts; " +
+                        "a month is 4× weeks with daily photos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(Spacing.xs))
+                SettingsAction(
+                    title = "Today — 1 day",
+                    detail = "Daily CSV row, hourly photo, insights.",
+                    actionLabel = if (periodBusy) "Working…" else "Download",
+                    enabled = !periodBusy,
+                    onAction = { onExportPeriod(1L) },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsAction(
+                    title = "This week — 7 days",
+                    detail = "Daily photos + weekly charts and weekly CSV.",
+                    actionLabel = if (periodBusy) "Working…" else "Download",
+                    enabled = !periodBusy,
+                    onAction = { onExportPeriod(7L) },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsAction(
+                    title = "This month — 30 days",
+                    detail = "Daily photos, one chart set per week, monthly charts.",
+                    actionLabel = if (periodBusy) "Working…" else "Download",
+                    enabled = !periodBusy,
+                    onAction = { onExportPeriod(30L) },
+                )
+            }
+        }
+
+        item {
             Panel(title = "Privacy") {
                 Text(
                     text = "Everything Intent knows is on this phone. There is no account, " +
@@ -220,6 +309,47 @@ fun SettingsScreen(
                 showDigestDialog = false
             },
         )
+    }
+
+    if (showBedtimeDialog) {
+        BedtimeDialog(
+            current = bedtime,
+            onDismiss = { showBedtimeDialog = false },
+            onConfirm = { start, end ->
+                onSetBedtime(start, end)
+                showBedtimeDialog = false
+            },
+        )
+    }
+}
+
+/**
+ * The bedtime row's second line.
+ *
+ * Three states rather than two: what is missing, what is set, and what is set but keeps
+ * being broken. The third is the one worth saying out loud — a window that is missed every
+ * week is a window that was guessed wrong, and the row is where the guess can be changed.
+ */
+private fun bedtimeDetail(window: BedtimeWindow?, nudge: BedtimeNudge): String {
+    if (window == null) {
+        return "No quiet window set. A bedtime colours each night on the Goals heatmap, " +
+            "held or broken."
+    }
+
+    val hours = "${DurationFormat.timeOfDay(window.startMinutesOfDay)} – " +
+        DurationFormat.timeOfDay(window.endMinutesOfDay)
+
+    return when {
+        nudge.repeated -> "Missed ${nudge.missedNights} of the last " +
+            "${nudge.judgedNights} nights inside $hours. Worth moving to an hour that " +
+            "fits your evenings."
+
+        nudge.judgedNights == 0 -> "$hours. Nothing inside it has been judged yet."
+
+        nudge.missedNights == 0 -> "$hours. Held on every night judged so far."
+
+        else -> "$hours. Broken on ${nudge.missedNights} of the " +
+            "${nudge.judgedNights} nights judged so far."
     }
 }
 
@@ -268,6 +398,8 @@ private fun SettingsAction(
     actionLabel: String,
     onAction: () -> Unit,
     enabled: Boolean = true,
+    /** Only the rows with something to flag change this; the rest stay quiet. */
+    detailTint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -282,7 +414,7 @@ private fun SettingsAction(
             Text(
                 text = detail,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = detailTint,
             )
         }
         TextButton(onClick = onAction, enabled = enabled) {

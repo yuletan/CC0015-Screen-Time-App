@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.intent.screentime.core.time.DayWindow
 import com.intent.screentime.data.focus.FocusStats
+import com.intent.screentime.data.local.entity.DailySummaryEntity
 import com.intent.screentime.data.local.entity.FocusSessionEntity
 import com.intent.screentime.data.local.entity.TargetEntity
 import com.intent.screentime.data.local.entity.TargetType
@@ -29,6 +30,8 @@ data class FocusUiState(
     val elapsedMs: Long = 0L,
     val label: String? = null,
     val todayFocusMs: Long = 0L,
+    /** How much of [todayFocusMs] the stretch detector found rather than the timer. */
+    val autoFocusMs: Long = 0L,
     val goalMinutes: Int? = null,
     val streakDays: Int = 0,
     val history: List<FocusSessionEntity> = emptyList(),
@@ -61,13 +64,15 @@ class FocusViewModel(
         val focus: FocusSessionManager.FocusState,
         val history: List<FocusSessionEntity>,
         val targets: List<TargetEntity>,
+        val summary: DailySummaryEntity?,
     )
 
     private val inputs: Flow<Inputs> = combine(
         manager.state,
         repository.observeFocusSince(DayWindow.startOfDayMs(today) - HISTORY_WINDOW_MS),
         repository.observeTargets(),
-    ) { focus, history, targets -> Inputs(focus, history, targets) }
+        repository.observeDay(today),
+    ) { focus, history, targets, summary -> Inputs(focus, history, targets, summary) }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val state: StateFlow<FocusUiState> = inputs
@@ -98,7 +103,11 @@ class FocusViewModel(
             remainingMs = input.focus.remainingMs(nowMs),
             elapsedMs = input.focus.elapsedMs(nowMs),
             label = input.focus.label,
-            todayFocusMs = FocusStats.completedMsOn(input.history, today),
+            // The day's own figure once it exists: it is the union of the timer and the
+            // stretch detector, and it is what the Today board and the score read.
+            todayFocusMs = input.summary?.focusMs
+                ?: FocusStats.completedMsOn(input.history, today),
+            autoFocusMs = input.summary?.autoFocusMs ?: 0L,
             goalMinutes = goalMinutes,
             streakDays = FocusStats.streak(input.history, today),
             history = input.history

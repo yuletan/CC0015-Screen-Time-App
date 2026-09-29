@@ -1,7 +1,9 @@
 package com.intent.screentime.ui.goals
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,9 +29,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
 import com.intent.screentime.data.local.entity.TargetType
+import com.intent.screentime.ui.components.BedtimeDialog
+import com.intent.screentime.ui.components.CapturablePanel
+import com.intent.screentime.ui.components.DurationPickerDialog
 import com.intent.screentime.ui.components.Panel
 import com.intent.screentime.ui.components.ProgressRing
 import com.intent.screentime.ui.components.SectionEyebrow
@@ -41,14 +47,15 @@ import com.intent.screentime.ui.theme.dataColors
 /**
  * The Goals board.
  *
- * Ordered by what actually motivates: the streak first, because it is the thing the
- * user is protecting, then the weekly commitments whose progress is worth watching, and
- * only then the two daily values that are steady state.
+ * Ordered by what actually motivates: the streak first, because it is the thing the user
+ * is protecting, then the weekly commitments whose progress is worth watching, and only
+ * then the daily values that are steady state.
  */
 @Composable
 fun GoalsScreen(
     state: GoalsUiState,
     onSetTarget: (TargetType, Int?) -> Unit,
+    onSetBedtime: (Int?, Int?) -> Unit,
     onOpenDay: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -122,21 +129,41 @@ fun GoalsScreen(
                     },
                     onChange = { editing = TargetType.DAILY_FOCUS_GOAL },
                 )
+                TargetRow(
+                    title = "Bedtime",
+                    value = state.bedtime?.let {
+                        "${DurationFormat.timeOfDay(it.startMinutesOfDay)} – " +
+                            DurationFormat.timeOfDay(it.endMinutesOfDay)
+                    },
+                    onChange = { editing = TargetType.BEDTIME_WINDOW },
+                )
+                BedtimeStanding(state)
             }
         }
     }
 
     val editingType = editing
-    if (editingType != null) {
-        MinutesDialog(
-            config = configFor(editingType),
-            currentMinutes = currentMinutesFor(state, editingType),
+    if (editingType == TargetType.BEDTIME_WINDOW) {
+        BedtimeDialog(
+            current = state.bedtime,
             onDismiss = { editing = null },
-            onConfirm = { minutes ->
-                onSetTarget(editingType, minutes)
+            onConfirm = { start, end ->
+                onSetBedtime(start, end)
                 editing = null
             },
         )
+    } else if (editingType != null) {
+        configFor(editingType)?.let { config ->
+            MinutesDialog(
+                config = config,
+                currentMinutes = currentMinutesFor(state, editingType),
+                onDismiss = { editing = null },
+                onConfirm = { minutes ->
+                    onSetTarget(editingType, minutes)
+                    editing = null
+                },
+            )
+        }
     }
 }
 
@@ -144,7 +171,14 @@ fun GoalsScreen(
 private fun StreakPanel(state: GoalsUiState, onOpenDay: (Long) -> Unit) {
     val data = dataColors
 
-    Panel(title = "Streak") {
+    // The hint is a subtitle rather than a line in the body: a subtitle renders outside
+    // the captured region, so the exported image carries the chart and not the
+    // instruction for using it.
+    CapturablePanel(
+        title = "Streak",
+        fileName = "goals-streak-heatmap",
+        subtitle = "Tap a day for its card.",
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -182,15 +216,59 @@ private fun StreakPanel(state: GoalsUiState, onOpenDay: (Long) -> Unit) {
 
         Spacer(Modifier.height(Spacing.xs))
 
-        StreakHeatmap(weeks = state.heatmap, onCellClick = onOpenDay)
+        // The grid reports against the commitments that exist: with no quiet window set,
+        // a square must not claim a night was kept that was never defined.
+        val hasBedtime = state.bedtime != null
+
+        StreakHeatmap(
+            weeks = state.heatmap,
+            hasBedtime = hasBedtime,
+            onCellClick = onOpenDay,
+        )
 
         Spacer(Modifier.height(Spacing.xs))
 
-        StreakHeatmapLegend()
+        StreakHeatmapLegend(hasBedtime = hasBedtime)
+    }
+}
 
+/**
+ * Last night, in one line.
+ *
+ * Read from the judged row rather than recomputed here, so this line, the heatmap square
+ * and the day card are all quoting the same verdict. Colour is paired with the word
+ * "held" or with the number of minutes, never left to carry the meaning alone.
+ */
+@Composable
+private fun BedtimeStanding(state: GoalsUiState) {
+    val window = state.bedtime ?: return
+    val met = state.lastNightMet
+    if (met == null) return
+
+    val data = dataColors
+    val hours = "${DurationFormat.timeOfDay(window.startMinutesOfDay)}–" +
+        DurationFormat.timeOfDay(window.endMinutesOfDay)
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Box(
+            Modifier
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(if (met) data.calm else data.watchful),
+        )
         Text(
-            text = "Tap a day for its card.",
-            style = MaterialTheme.typography.labelSmall,
+            text = when {
+                !met -> "Last night: ${DurationFormat.compact(state.lastNightUsedMs)} inside " +
+                    "the $hours window."
+                state.lastNightUsedMs <= 0L -> "Last night: held — the $hours window was clear."
+                else -> "Last night: held — only " +
+                    "${DurationFormat.compact(state.lastNightUsedMs)} inside the $hours window."
+            },
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -303,14 +381,21 @@ private data class DialogConfig(
     val title: String,
     val description: String,
     val presetsMinutes: List<Int>,
+    /** How far one tap on the custom stepper moves the minute wheel. */
+    val stepMinutes: Int = 5,
 )
 
-private fun configFor(type: TargetType): DialogConfig = when (type) {
+/**
+ * Null for the bedtime window, which is a pair of times rather than an amount and so is
+ * edited by its own dialog.
+ */
+private fun configFor(type: TargetType): DialogConfig? = when (type) {
     TargetType.WEEKLY_SCREEN_TIME_CAP -> DialogConfig(
         title = "Weekly screen time cap",
         description = "The whole week, not a day. Intent judges each evening against a " +
             "seventh of this, so the streak still means something daily.",
         presetsMinutes = listOf(14, 21, 28, 35, 42, 49).map { it * 60 },
+        stepMinutes = 15,
     )
 
     TargetType.WEEKLY_PRODUCTION_GOAL -> DialogConfig(
@@ -318,6 +403,7 @@ private fun configFor(type: TargetType): DialogConfig = when (type) {
         description = "Hours of producing rather than consuming, each week. Aim for a " +
             "number you can hit in a normal week, not a heroic one.",
         presetsMinutes = listOf(5, 7, 10, 14, 20).map { it * 60 },
+        stepMinutes = 15,
     )
 
     TargetType.DAILY_FOCUS_GOAL -> DialogConfig(
@@ -337,6 +423,8 @@ private fun configFor(type: TargetType): DialogConfig = when (type) {
         description = "Set from an app's own screen.",
         presetsMinutes = listOf(15, 30, 45, 60, 90),
     )
+
+    TargetType.BEDTIME_WINDOW -> null
 }
 
 private fun currentMinutesFor(state: GoalsUiState, type: TargetType): Int? = when (type) {
@@ -345,12 +433,17 @@ private fun currentMinutesFor(state: GoalsUiState, type: TargetType): Int? = whe
     TargetType.DAILY_FOCUS_GOAL -> state.targets.dailyFocusGoalMinutes
     TargetType.DAILY_SCREEN_TIME_CAP -> state.targets.dailyCapMinutes
     TargetType.PER_APP_DAILY_CAP -> null
+    TargetType.BEDTIME_WINDOW -> null
 }
 
 /**
  * Presets rather than a slider, for the same reason as the cap dialog: a commitment is a
  * decision, and picking from round numbers is faster than dragging to a figure nobody
  * meant. Null clears the target.
+ *
+ * The quick chips stay the fast path, and *Custom…* opens a stepper for the cap someone
+ * actually means — an odd number of minutes is a decision too, and offering only 2h steps
+ * decides it for them.
  */
 @Composable
 private fun MinutesDialog(
@@ -359,6 +452,21 @@ private fun MinutesDialog(
     onDismiss: () -> Unit,
     onConfirm: (Int?) -> Unit,
 ) {
+    var custom by remember { mutableStateOf(false) }
+
+    if (custom) {
+        DurationPickerDialog(
+            title = config.title,
+            description = config.description,
+            currentMinutes = currentMinutes,
+            initialMinutes = currentMinutes ?: DEFAULT_CUSTOM_MINUTES,
+            stepMinutes = config.stepMinutes,
+            onDismiss = onDismiss,
+            onConfirm = onConfirm,
+        )
+        return
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(config.title) },
@@ -401,6 +509,9 @@ private fun MinutesDialog(
                         }
                     }
                 }
+                TextButton(onClick = { custom = true }) {
+                    Text("Custom…", style = MaterialTheme.typography.labelLarge)
+                }
             }
         },
         confirmButton = {
@@ -413,3 +524,5 @@ private fun MinutesDialog(
         },
     )
 }
+
+private const val DEFAULT_CUSTOM_MINUTES = 180

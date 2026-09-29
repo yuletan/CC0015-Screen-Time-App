@@ -4,12 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.intent.screentime.core.time.DayWindow
 import com.intent.screentime.data.goals.GoalTargets
+import com.intent.screentime.data.goals.GoalTracker
 import com.intent.screentime.data.goals.HeatmapBuilder
 import com.intent.screentime.data.goals.StreakEvaluator
 import com.intent.screentime.data.local.entity.DailySummaryEntity
 import com.intent.screentime.data.local.entity.TargetEntity
 import com.intent.screentime.data.local.entity.TargetType
 import com.intent.screentime.data.repository.UsageRepository
+import com.intent.screentime.data.usage.BedtimeWindow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +35,17 @@ data class GoalsUiState(
     val bestStreak: Int = 0,
     val bestDayScore: Int = 0,
     val heatmap: List<List<HeatmapBuilder.Cell>> = emptyList(),
+    /**
+     * Last night's verdict, from the judged row rather than recomputed: it is the same
+     * number the heatmap square and the day card are reading.
+     *
+     * Null when no window is set, or when the night has not been judged yet.
+     */
+    val lastNightMet: Boolean? = null,
+    val lastNightUsedMs: Long = 0L,
 ) {
+    val bedtime: BedtimeWindow? get() = targets.bedtime
+
     val weeklyCapMs: Long? get() = targets.weeklyCapMinutes?.takeIf { it > 0 }?.let { it * 60_000L }
     val weeklyGoalMs: Long? get() =
         targets.weeklyProductionGoalMinutes?.takeIf { it > 0 }?.let { it * 60_000L }
@@ -52,13 +64,14 @@ data class GoalsUiState(
 /**
  * The Goals board: what was committed to, and whether it is being honoured.
  *
- * Four commitments live here — a weekly cap, a weekly production goal, a daily cap and a
- * daily focus goal — plus the streak that only exists because of them. Everything is
- * derived from two queries (this week's summaries and the streak rows), so the screen
- * stays cheap to open.
+ * Five commitments live here — a weekly cap, a weekly production goal, a daily cap, a
+ * daily focus goal and a bedtime window — plus the streak that only exists because of
+ * them. Everything is derived from two queries (this week's summaries and the streak
+ * rows), so the screen stays cheap to open.
  */
 class GoalsViewModel(
     private val repository: UsageRepository,
+    private val goalTracker: GoalTracker,
 ) : ViewModel() {
 
     private val today: Long = DayWindow.todayEpochDay()
@@ -80,6 +93,8 @@ class GoalsViewModel(
     ): GoalsUiState {
         val streakRows = repository.recentStreakRows(STREAK_LOOKBACK)
         val todayRow = week.firstOrNull { it.dayEpochDay == today }
+        val targets = GoalTargets.from(targetRows)
+        val lastNight = streakRows.firstOrNull { it.dayEpochDay == today - 1 }
 
         return GoalsUiState(
             loading = false,
@@ -90,23 +105,47 @@ class GoalsViewModel(
             todayScreenTimeMs = todayRow?.screenTimeMs ?: 0L,
             todayProductionMs = todayRow?.productionMs ?: 0L,
             todayFocusMs = todayRow?.focusMs ?: 0L,
-            targets = GoalTargets.from(targetRows),
+            targets = targets,
             currentStreak = StreakEvaluator.currentStreak(streakRows, today),
             bestStreak = StreakEvaluator.bestStreak(streakRows),
             bestDayScore = streakRows.maxOfOrNull { it.score } ?: 0,
             heatmap = HeatmapBuilder.weeks(streakRows, today, HEATMAP_WEEKS),
+            lastNightMet = lastNight?.metBedtime,
+            lastNightUsedMs = lastNight?.bedtimeUsedMs ?: 0L,
         )
     }
 
+    /**
+     * Writes a target and then re-judges the recent past against it.
+     *
+     * The re-judge is the point rather than a nicety: a heatmap that keeps yesterday's
+     * verdict until the next nightly pass is a heatmap that contradicts the goal the user
+     * just set, and a bedtime would not appear on it at all until tomorrow.
+     */
     fun setTarget(type: TargetType, minutes: Int?) {
         viewModelScope.launch {
             repository.setTarget(type, minutes)
-            dataVersion.value += 1
+            rejudge()
         }
+    }
+
+    fun setBedtime(startMinutesOfDay: Int?, endMinutesOfDay: Int?) {
+        viewModelScope.launch {
+            repository.setBedtime(startMinutesOfDay, endMinutesOfDay)
+            rejudge()
+        }
+    }
+
+    private suspend fun rejudge() {
+        goalTracker.evaluateStreaks(fromDay = today - STREAK_WINDOW_DAYS, toDay = today)
+        dataVersion.value += 1
     }
 
     private companion object {
         const val STREAK_LOOKBACK = 120
         const val HEATMAP_WEEKS = 12
+
+        /** Comfortably longer than the twelve weeks the heatmap shows. */
+        const val STREAK_WINDOW_DAYS = 90L
     }
 }

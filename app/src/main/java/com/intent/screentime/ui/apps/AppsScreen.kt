@@ -31,15 +31,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
 import com.intent.screentime.data.local.entity.CategoryKind
+import com.intent.screentime.ui.components.categoryColor
 import com.intent.screentime.ui.components.AppIcon
 import com.intent.screentime.ui.components.CategoryChip
 import com.intent.screentime.ui.components.EmptyState
+import com.intent.screentime.ui.components.Panel
 import com.intent.screentime.ui.components.SectionEyebrow
 import com.intent.screentime.ui.components.Sparkline
-import com.intent.screentime.ui.components.categoryColor
 import com.intent.screentime.ui.theme.Spacing
 import com.intent.screentime.ui.theme.dataColors
-import com.intent.screentime.ui.theme.toComposeColor
+
+private const val MAX_NOTICED_APPS = 3
 
 @Composable
 fun AppsScreen(
@@ -140,6 +142,17 @@ fun AppsScreen(
             }
         }
 
+        val noticed = state.rows.filter { it.insight != null }.take(MAX_NOTICED_APPS)
+        if (noticed.isNotEmpty()) {
+            item {
+                WorthNoticingPanel(
+                    rows = noticed,
+                    appInfo = appInfo,
+                    onOpenApp = onOpenApp,
+                )
+            }
+        }
+
         items(state.rows, key = { it.packageName }) { row ->
             AppRow(
                 row = row,
@@ -147,6 +160,50 @@ fun AppsScreen(
                 appInfo = appInfo,
                 onClick = { onOpenApp(row.packageName) },
             )
+        }
+    }
+}
+
+@Composable
+private fun WorthNoticingPanel(
+    rows: List<AppListRow>,
+    appInfo: AppInfoProvider,
+    onOpenApp: (String) -> Unit,
+) {
+    Panel(
+        title = "Worth noticing",
+        subtitle = "A few patterns that may be useful to look at, not rules to follow.",
+    ) {
+        rows.forEach { row ->
+            val insight = row.insight ?: return@forEach
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenApp(row.packageName) }
+                    .padding(vertical = Spacing.xs),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                AppIcon(packageName = row.packageName, provider = appInfo, size = 36.dp)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "${appInfo.label(row.packageName)} · ${insight.title}",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = insight.body,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = "Open ${appInfo.label(row.packageName)} details",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -175,26 +232,31 @@ private fun AppRow(
             AppIcon(packageName = row.packageName, provider = appInfo, size = 44.dp)
 
             Column(Modifier.weight(1f)) {
-                Row(
+                Text(
+                    text = appInfo.label(row.packageName),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                ) {
-                    Text(
-                        text = appInfo.label(row.packageName),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                )
+                if (row.category != null) {
+                    val category = row.category
+                    Spacer(Modifier.height(Spacing.xs))
+                    CategoryChip(
+                        name = category.name,
+                        color = categoryColor(category.kind, dataColors),
+                        kind = category.kind,
+                        categoryId = category.id,
                     )
-                    row.category?.let { category ->
-                        CategoryChip(
-                            name = category.name,
-                            color = category.colorHex.toComposeColor(),
-                        )
-                    }
+                } else {
+                    Spacer(Modifier.height(Spacing.xs))
+                    CategoryChip(
+                        name = "Unsorted",
+                        color = dataColors.neutral.copy(alpha = 0.65f),
+                    )
                 }
+
 
                 Spacer(Modifier.height(6.dp))
 
@@ -238,11 +300,4 @@ private fun AppRow(
             }
         }
     }
-}
-
-internal fun CategoryKind.label(): String = when (this) {
-    CategoryKind.PRODUCTION -> "PRODUCING"
-    CategoryKind.CONSUMPTION -> "CONSUMING"
-    CategoryKind.UTILITY -> "UTILITY"
-    CategoryKind.NEUTRAL -> "EITHER"
 }

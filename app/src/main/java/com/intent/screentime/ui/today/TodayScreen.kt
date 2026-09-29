@@ -20,8 +20,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
@@ -41,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,21 +53,26 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
+import com.intent.screentime.core.format.HourFormat
+import com.intent.screentime.data.goals.IntentScore
+import com.intent.screentime.data.stats.UsageSplit
+import com.intent.screentime.data.usage.Bedtime
 import com.intent.screentime.ui.apps.AppInfoProvider
 import com.intent.screentime.ui.components.AppIcon
 import com.intent.screentime.ui.components.CategoryChip
 import com.intent.screentime.ui.components.DeltaPill
 import com.intent.screentime.ui.components.EmptyState
 import com.intent.screentime.ui.components.HourlyStrip
+import com.intent.screentime.ui.components.IntentScorePanel
 import com.intent.screentime.ui.components.Panel
-import com.intent.screentime.ui.components.ProgressRing
+import com.intent.screentime.ui.components.ProducingVsConsumingPanel
+import com.intent.screentime.ui.components.ScoreDetail
 import com.intent.screentime.ui.components.SectionEyebrow
-import com.intent.screentime.ui.components.SplitBar
-import com.intent.screentime.ui.components.SplitSegment
 import com.intent.screentime.ui.components.StatTile
 import com.intent.screentime.ui.components.TimeRing
 import com.intent.screentime.ui.components.busiestHour
-import com.intent.screentime.ui.components.hourLabel
+import com.intent.screentime.ui.components.categoryColor
+import com.intent.screentime.ui.components.pointsText
 import com.intent.screentime.ui.theme.Motion
 import com.intent.screentime.ui.theme.Spacing
 import com.intent.screentime.ui.theme.dataColors
@@ -141,7 +149,7 @@ fun TodayScreen(
 
         item {
             EnterAnimation(index = 3) {
-                TimelinePanel(state = state)
+                TimelinePanel(state = state, appInfo = appInfo)
             }
         }
 
@@ -279,13 +287,13 @@ private fun HeroPanel(state: TodayUiState, onSetCapClick: () -> Unit) {
         TimeRing(
             usedMs = state.screenTimeMs,
             targetMs = state.capMs,
-            diameter = 236.dp,
-            strokeWidth = 22.dp,
+            diameter = 216.dp,
+            strokeWidth = 20.dp,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = DurationFormat.compact(state.screenTimeMs),
-                    style = MaterialTheme.typography.displayLarge,
+                    style = MaterialTheme.typography.displayMedium,
                     color = scheme.onSurface,
                 )
                 Text(
@@ -346,180 +354,172 @@ private fun StatusPill(icon: ImageVector, text: String, tint: androidx.compose.u
     }
 }
 
-@Composable
-private fun SplitPanel(state: TodayUiState, onOpenTriage: () -> Unit) {
-    val data = dataColors
-
-    val segments = listOf(
-        SplitSegment("Producing", state.productionMs, data.production),
-        SplitSegment("Consuming", state.consumptionMs, data.consumption),
-        SplitSegment("Utility", state.utilityMs, data.utility),
-        SplitSegment("Unsorted", state.neutralMs, data.neutral),
-    )
-
-    Panel(title = "Producing vs consuming") {
-        SplitBar(segments = segments)
-
-        Spacer(Modifier.height(Spacing.xs))
-
-        Text(
-            text = when {
-                state.productionMs == 0L && state.consumptionMs == 0L ->
-                    "Not enough categorised time yet. Sort your apps on the Apps screen " +
-                        "and this split starts meaning something."
-
-                state.productionShare >= 0.25f ->
-                    "${(state.productionShare * 100).toInt()}% of your categorised time went " +
-                        "into producing rather than consuming."
-
-                else ->
-                    "${(state.productionShare * 100).toInt()}% of your categorised time went " +
-                        "into producing. Utility and unsorted time is deliberately left out " +
-                        "of this ratio."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        if (state.unsortedCount > 0) {
-            Spacer(Modifier.height(Spacing.xs))
-            UnsortedRow(
-                count = state.unsortedCount,
-                ms = state.unsortedMs,
-                onClick = onOpenTriage,
-            )
-        }
-    }
-}
-
 /**
- * Today's unsorted pile, offered as a way to clear it.
+ * Today against the split, in today's own words.
  *
- * The split can read a misleading low simply because nothing is categorised, so this says
- * how much time that is and offers the fix in place, rather than describing the problem and
- * sending the user elsewhere.
+ * The rendering lives in the shared panel so a past day, a week and today cannot answer
+ * "did I spend this time or did it spend me" in three different shapes.
  */
 @Composable
-private fun UnsortedRow(count: Int, ms: Long, onClick: () -> Unit) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "${DurationFormat.compact(ms)} unsorted across " +
-                    (if (count == 1) "1 app" else "$count apps") + " — sort",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                imageVector = Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
+private fun SplitPanel(state: TodayUiState, onOpenTriage: () -> Unit) {
+    ProducingVsConsumingPanel(
+        split = UsageSplit(
+            productionMs = state.productionMs,
+            consumptionMs = state.consumptionMs,
+            utilityMs = state.utilityMs,
+            neutralMs = state.neutralMs,
+            unsortedMs = state.unsortedMs,
+            unsortedCount = state.unsortedCount,
+        ),
+        fileName = "today-split",
+        onOpenTriage = onOpenTriage,
+        prose = when {
+            state.productionMs == 0L && state.consumptionMs == 0L ->
+                "Not enough categorised time yet. Sort your apps on the Apps screen " +
+                    "and this split starts meaning something."
+
+            state.productionShare >= 0.25f ->
+                "${(state.productionShare * 100).toInt()}% of your categorised time went " +
+                    "into producing rather than consuming."
+
+            else ->
+                "${(state.productionShare * 100).toInt()}% of your categorised time went " +
+                    "into producing. Utility and unsorted time is deliberately left out " +
+                    "of this ratio."
+        },
+    )
 }
 
 /**
- * The composite score, and the sentence that explains it.
+ * Today's score, in today's own words.
  *
- * A single number is only motivating if the reader knows what moved it, so the ring is
- * always accompanied by the breakdown: the split, the cap, focus time, the streak.
+ * The ring, the five rows and the detail list live in the shared panel; only the sentences
+ * are today's, because "tonight's window has not opened yet" is a thing only today can say.
  */
 @Composable
 private fun ScorePanel(state: TodayUiState) {
-    val scheme = MaterialTheme.colorScheme
-    val data = dataColors
-    val parts = state.scoreParts
+    val contributions = scoreContributions(state)
 
-    Panel(title = "Intent Score") {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-        ) {
-            ProgressRing(
-                progress = state.intentScore / 100f,
-                diameter = 96.dp,
-                strokeWidth = 11.dp,
-                color = when {
-                    state.intentScore >= 70 -> data.production
-                    state.intentScore >= 45 -> scheme.primary
-                    else -> scheme.error
-                },
-            ) {
-                Text(
-                    text = state.intentScore.toString(),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = scheme.onSurface,
-                )
-            }
+    IntentScorePanel(
+        score = state.intentScore,
+        verdict = when {
+            state.intentScore >= 70 -> "A day worth repeating."
+            state.intentScore >= 45 -> "A mixed day — the split is doing the work."
+            else -> "Consumption had the run of today."
+        },
+        explanation = scoreExplanation(state),
+        contributions = contributions,
+        details = contributions.map { contribution ->
+            ScoreDetail(
+                kind = contribution.kind,
+                tone = contribution.tone,
+                text = contributionExplanation(state, contribution),
+                pointsText = contribution.pointsText(),
+            )
+        },
+        fileName = "today-intent-score",
+    )
+}
 
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = when {
-                        state.intentScore >= 70 -> "A day worth repeating."
-                        state.intentScore >= 45 -> "A mixed day — the split is doing the work."
-                        else -> "Consumption had the run of today."
-                    },
-                    style = MaterialTheme.typography.titleSmall,
-                    color = scheme.onSurface,
-                )
-                Text(
-                    text = scoreExplanation(state),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
-                )
-                if (parts != null) {
-                    Text(
-                        text = "Producing ${percent(parts.production)} · " +
-                            "cap ${percent(parts.cap)} · " +
-                            "focus ${percent(parts.focus)} · " +
-                            "streak ${percent(parts.streak)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = scheme.onSurfaceVariant,
-                    )
-                }
-            }
+private fun scoreContributions(state: TodayUiState): List<IntentScore.Contribution> =
+    IntentScore.contributions(
+        productionMs = state.productionMs,
+        consumptionMs = state.consumptionMs,
+        screenTimeMs = state.screenTimeMs,
+        capMs = state.capMs,
+        focusMs = state.focusMs,
+        streakDays = state.streakDays,
+    )
+
+private fun contributionExplanation(
+    state: TodayUiState,
+    contribution: IntentScore.Contribution,
+): String = when (contribution.kind) {
+    IntentScore.ContributionKind.PRODUCTION -> if (state.productionMs + state.consumptionMs <= 0L) {
+        "No Producing or Consuming time has been categorised yet."
+    } else {
+        "${(state.productionShare * 100).toInt()}% of Producing and Consuming time was Producing."
+    }
+    IntentScore.ContributionKind.CAP -> {
+        val capMs = state.capMs
+        when {
+            capMs == null -> "No daily cap is set, so this part stays neutral."
+            state.overCap -> "${DurationFormat.compact(state.overageMs)} over your " +
+                "${DurationFormat.compact(capMs)} cap."
+            else -> "${DurationFormat.compact(capMs - state.screenTimeMs)} left before your cap."
         }
+    }
+    IntentScore.ContributionKind.BEDTIME -> {
+        val window = state.bedtimeWindow
+        when {
+            window == null -> "No bedtime is set, so this part stays neutral."
+            state.bedtimeStatus == Bedtime.Status.PENDING ->
+                "Tonight's window has not opened yet. It runs " +
+                    "${DurationFormat.timeOfDay(window.startMinutesOfDay)} to " +
+                    "${DurationFormat.timeOfDay(window.endMinutesOfDay)}."
+            state.bedtimeStatus == Bedtime.Status.HELD ->
+                "Kept so far — ${DurationFormat.compact(state.bedtimeUsedMs)} inside your " +
+                    "window, and up to five minutes still counts."
+            else -> "${DurationFormat.compact(state.bedtimeUsedMs)} inside your bedtime " +
+                "window. Under five minutes keeps the night."
+        }
+    }
+    IntentScore.ContributionKind.FOCUS -> if (state.focusMs > 0L) {
+        "${DurationFormat.compact(state.focusMs)} focused today; one hour earns full credit."
+    } else {
+        "No focused time recorded yet today."
+    }
+    IntentScore.ContributionKind.STREAK -> when {
+        state.streakDays <= 0 -> "No consecutive days inside your cap yet."
+        state.streakDays >= STREAK_FULL_CREDIT_DAYS -> "${state.streakDays} consecutive days inside your cap."
+        else -> "${state.streakDays} consecutive days inside your cap."
     }
 }
 
-private fun percent(fraction: Float): String = "${(fraction * 100).toInt()}%"
+/** Seven days inside the cap maxes the streak row — kept in step with IntentScore. */
+private const val STREAK_FULL_CREDIT_DAYS = 7
 
 private fun scoreExplanation(state: TodayUiState): String {
-    val streak = if (state.streakDays > 0) {
-        " A ${state.streakDays}-day streak is carrying ${(state.scoreParts?.streak ?: 0f) * 15f} " +
-            "points of it."
+    val points = state.scorePoints
+    val streak = if (points != null && state.streakDays in 1 until STREAK_FULL_CREDIT_DAYS) {
+        " Your ${state.streakDays}-day streak is worth ${points.streak} of " +
+            "${IntentScore.STREAK_MAX} points — ${STREAK_FULL_CREDIT_DAYS - state.streakDays} " +
+            "more days maxes it out."
     } else {
         ""
     }
+    val detected = if (state.autoFocusMs > 0L) {
+        " ${DurationFormat.compact(state.autoFocusMs)} of today's focus was detected from " +
+            "long uninterrupted stretches in your work apps."
+    } else {
+        ""
+    }
+    val night = if (state.bedtimeStatus == Bedtime.Status.MISSED) {
+        " ${DurationFormat.compact(state.bedtimeUsedMs)} of screen time has landed inside " +
+            "tonight's quiet window."
+    } else {
+        ""
+    }
+
     return when {
         state.capMs == null && state.productionMs == 0L && state.consumptionMs == 0L ->
-            "Sort your apps on the Apps screen and set a cap; both feed straight into " +
+            "Sort your apps on the Apps screen and set a cap — both feed straight into " +
                 "this number."
         state.overCap ->
-            "Being over your cap is costing points, and producing time is what wins them " +
-                "back.$streak"
+            "You ran ${DurationFormat.compact(state.overageMs)} past your cap today, which " +
+                "costs points. Producing time is what wins them back.$night$streak$detected"
         else ->
-            "Weighted from producing versus consuming, staying under your cap, focus " +
-                "time and your streak.$streak"
+            "Five things build this number: producing time, staying under your cap, " +
+                "tonight's bedtime, focus, and your streak.$night$streak$detected"
     }
 }
 
 @Composable
-private fun TimelinePanel(state: TodayUiState) {
+private fun TimelinePanel(state: TodayUiState, appInfo: AppInfoProvider) {
     val peak = busiestHour(state.buckets)
 
     Panel(title = "The shape of your day") {
-        HourlyStrip(buckets = state.buckets)
+        HourlyStrip(buckets = state.buckets, labelOf = appInfo::label)
 
         if (peak != null) {
             Row(
@@ -534,7 +534,7 @@ private fun TimelinePanel(state: TodayUiState) {
                     modifier = Modifier.size(14.dp),
                 )
                 Text(
-                    text = "Busiest stretch was ${hourLabel(peak.hour)} " +
+                    text = "Busiest stretch was ${HourFormat.short(peak.hour)} " +
                         "at ${DurationFormat.compact(peak.totalMs)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -593,29 +593,29 @@ private fun AppUsageRowItem(row: AppUsageRow, maxMs: Long, appInfo: AppInfoProvi
             AppIcon(packageName = row.packageName, provider = appInfo, size = 44.dp)
 
             Column(Modifier.weight(1f)) {
-                Row(
+                Text(
+                    text = appInfo.label(row.packageName),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                ) {
-                    Text(
-                        text = appInfo.label(row.packageName),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                )
+                if (row.category != null) {
+                    val category = row.category
+                    Spacer(Modifier.height(Spacing.xs))
+                    CategoryChip(
+                        name = category.name,
+                        kind = category.kind,
+                        categoryId = category.id,
+                        color = categoryColor(category.kind, dataColors),
                     )
-                    row.category?.let { category ->
-                        CategoryChip(
-                            name = category.name,
-                            color = category.colorHex.let {
-                                androidx.compose.ui.graphics.Color(
-                                    android.graphics.Color.parseColor(it),
-                                )
-                            },
-                        )
-                    }
+                } else {
+                    Spacer(Modifier.height(Spacing.xs))
+                    CategoryChip(
+                        name = "Unsorted",
+                        color = dataColors.neutral.copy(alpha = 0.65f),
+                    )
                 }
 
                 Spacer(Modifier.height(6.dp))

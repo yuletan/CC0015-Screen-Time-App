@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import com.intent.screentime.data.category.CategoryClassifier
 import com.intent.screentime.data.export.CsvExporter
+import com.intent.screentime.data.export.PeriodExporter
 import com.intent.screentime.data.goals.GoalTracker
 import com.intent.screentime.data.local.IntentDatabase
 import com.intent.screentime.data.prefs.UserPreferences
@@ -54,6 +55,18 @@ class AppContainer(context: Context) {
     val csvExporter: CsvExporter by lazy { CsvExporter(appContext, database) }
 
     /**
+     * Day / week / month downloads: one zip with `csv/` + `photos/` + `insights.md`.
+     * Labels resolve through the classifier so `apps.csv` carries names, not packages.
+     */
+    val periodExporter: PeriodExporter by lazy {
+        PeriodExporter(
+            context = appContext,
+            repository = usageRepository,
+            labelOf = classifier::labelOf,
+        )
+    }
+
+    /**
      * Moves the digest to a new time of day. Kept here rather than in a ViewModel so the
      * screen never needs a Context just to talk to WorkManager.
      */
@@ -94,6 +107,7 @@ class AppContainer(context: Context) {
             preferences = preferences,
             notifier = notifier,
             labelOf = classifier::labelOf,
+            excludedPackages = excludedPackages,
         )
     }
 

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,33 +28,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
+import com.intent.screentime.data.stats.AppUsageInsight
 import com.intent.screentime.ui.apps.AppInfoProvider
 import com.intent.screentime.ui.components.AppIcon
+import com.intent.screentime.ui.components.CapturablePanel
 import com.intent.screentime.ui.components.CategoryChip
 import com.intent.screentime.ui.components.CategoryPickerDialog
+import com.intent.screentime.ui.components.ChartRange
+import com.intent.screentime.ui.components.ChartRangeSelector
+import com.intent.screentime.ui.components.ChartUnit
+import com.intent.screentime.ui.components.displayLabel
 import com.intent.screentime.ui.components.Panel
 import com.intent.screentime.ui.components.SectionEyebrow
 import com.intent.screentime.ui.components.SetCapDialog
 import com.intent.screentime.ui.components.StatTile
 import com.intent.screentime.ui.components.TrendChart
+import com.intent.screentime.ui.components.WindowStepper
+import com.intent.screentime.ui.components.categoryColor
 import com.intent.screentime.ui.theme.Spacing
 import com.intent.screentime.ui.theme.dataColors
-import com.intent.screentime.ui.theme.toComposeColor
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun AppDetailScreen(
     state: AppDetailUiState,
     appInfo: AppInfoProvider,
     onBack: () -> Unit,
+    onSelectRange: (ChartRange) -> Unit,
+    onPreviousWindow: () -> Unit,
+    onNextWindow: () -> Unit,
     onSetCap: (Int?) -> Unit,
     onSetCategory: (String) -> Unit,
+    onOpenDay: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showCapDialog by remember { mutableStateOf(false) }
     var showCategoryDialog by remember { mutableStateOf(false) }
-    val formatter = remember { DateTimeFormatter.ofPattern("d MMM") }
 
     LazyColumn(
         modifier = modifier.fillMaxWidth(),
@@ -85,36 +94,92 @@ fun AppDetailScreen(
                         text = appInfo.label(state.packageName),
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "Last 30 days",
+                        // The window's own dates once it exists: which seven days the
+                        // chart is showing is the first thing the reader needs.
+                        text = state.windowLabel.ifEmpty { state.range.caption },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                state.category?.let { category ->
-                    CategoryChip(
-                        name = category.name,
-                        color = category.colorHex.toComposeColor(),
-                    )
+                    if (state.category != null) {
+                        val category = state.category
+                        Spacer(Modifier.height(Spacing.xs))
+                        CategoryChip(
+                            name = category.name,
+                            color = categoryColor(category.kind, dataColors),
+                            kind = category.kind,
+                            categoryId = category.id,
+                        )
+                    } else {
+                        Spacer(Modifier.height(Spacing.xs))
+                        CategoryChip(
+                            name = "Unsorted",
+                            color = dataColors.neutral.copy(alpha = 0.65f),
+                        )
+                    }
                 }
             }
         }
 
         item {
-            Panel(title = "Trend") {
-                val peak = state.peakMs
+            ChartRangeSelector(selected = state.range, onSelect = onSelectRange)
+        }
+
+        item {
+            WindowStepper(
+                label = state.windowLabel,
+                canGoBack = state.canGoBack,
+                canGoForward = state.canGoForward,
+                onPrevious = onPreviousWindow,
+                onNext = onNextWindow,
+                backDescription = "Previous ${state.range.noun}",
+                forwardDescription = "Next ${state.range.noun}",
+            )
+        }
+
+        // Nothing below is known until the first read lands; zeros and an empty chart
+        // would read as "this app was not used", which is a different statement.
+        if (state.loading) return@LazyColumn
+
+        item {
+            val hourly = state.unit == ChartUnit.HOUR
+            val weekly = state.unit == ChartUnit.WEEK
+
+            CapturablePanel(
+                title = "Trend",
+                fileName = "appdetail-trend-${state.range.name.lowercase()}",
+                subtitle = when {
+                    hourly && state.isPastWindow ->
+                        "${state.windowLabel}. Tap or drag across the chart to read any hour."
+                    hourly -> "Tap or drag across the chart to read any hour."
+                    weekly -> "Tap or drag across the chart to read any week."
+                    else -> "Tap or drag across the chart to read any day."
+                },
+            ) {
                 TrendChart(
-                    values = state.days.map { it.second },
+                    points = state.trend,
                     lineColor = dataColors.consumption,
-                    startLabel = state.days.firstOrNull()?.first
-                        ?.let { LocalDate.ofEpochDay(it).format(formatter) },
-                    endLabel = state.days.lastOrNull()?.first
-                        ?.let { LocalDate.ofEpochDay(it).format(formatter) },
-                    peakLabel = if (peak > 0) "peak ${DurationFormat.compact(peak)}" else null,
+                    onPointActivated = { index ->
+                        state.trend.getOrNull(index)?.epochDay?.let(onOpenDay)
+                    },
+                    target = state.trendTarget,
+                    emptyMessage = if (hourly) {
+                        if (state.isPastWindow) "Nothing recorded that day" else "Nothing recorded yet today"
+                    } else {
+                        "Not used in this range"
+                    },
                 )
+
+                if (state.trendTarget != null) {
+                    Text(
+                        text = "Dashed line: the daily cap you set for this app.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
                 Spacer(Modifier.height(Spacing.xs))
 
@@ -122,19 +187,56 @@ fun AppDetailScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    StatTile(
-                        value = DurationFormat.compact(state.todayMs),
-                        caption = "today",
-                    )
-                    StatTile(
-                        value = DurationFormat.compact(state.averageMs),
-                        caption = "per active day",
-                    )
-                    StatTile(
-                        value = DurationFormat.compact(state.totalMs),
-                        caption = "in 30 days",
-                    )
+                    if (hourly) {
+                        StatTile(
+                            value = DurationFormat.compact(state.totalMs),
+                            caption = if (state.isPastWindow) "used that day" else "used today",
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            value = state.busiest?.let { DurationFormat.compact(it.value) } ?: "—",
+                            caption = state.busiest
+                                ?.let { "busiest hour · ${it.label}" }
+                                ?: "busiest hour",
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            value = state.sessionCount.toString(),
+                            caption = "sessions",
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        StatTile(
+                            value = DurationFormat.compact(state.todayMs),
+                            caption = if (state.isPastWindow) "on the last day" else "today",
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            value = DurationFormat.compact(state.averageMs),
+                            caption = "per active day",
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            value = DurationFormat.compact(state.totalMs),
+                            caption = "in ${state.range.days} days",
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
+            }
+        }
+
+        state.insight?.let { insight ->
+            item {
+                AppInsightPanel(
+                    insight = insight,
+                    onAction = when (insight.action) {
+                        AppUsageInsight.Action.SET_CAP,
+                        AppUsageInsight.Action.CHANGE_CAP -> ({ showCapDialog = true })
+                        AppUsageInsight.Action.CHOOSE_CATEGORY -> ({ showCategoryDialog = true })
+                        null -> null
+                    },
+                )
             }
         }
 
@@ -149,7 +251,13 @@ fun AppDetailScreen(
                 )
                 RowLine(
                     title = "Category",
-                    value = state.category?.name ?: "Uncategorised",
+                    value = state.category?.let {
+                        if (it.id == "uncategorized") {
+                            "Unsorted"
+                        } else {
+                            "${it.name} · ${it.kind.displayLabel()}"
+                        }
+                    } ?: "Unsorted",
                     actionLabel = "Change",
                     onAction = { showCategoryDialog = true },
                 )
@@ -194,6 +302,48 @@ fun AppDetailScreen(
     }
 }
 
+@Composable
+private fun AppInsightPanel(
+    insight: AppUsageInsight,
+    onAction: (() -> Unit)?,
+) {
+    Panel(title = insight.title) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lightbulb,
+                contentDescription = "Usage insight",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = insight.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (onAction != null) {
+                    TextButton(onClick = onAction) {
+                        Text(
+                            text = when (insight.action) {
+                                AppUsageInsight.Action.SET_CAP -> "Set a cap"
+                                AppUsageInsight.Action.CHANGE_CAP -> "Change cap"
+                                AppUsageInsight.Action.CHOOSE_CATEGORY -> "Choose a category"
+                                null -> "Open"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A setting's name, its current value, and the way to change it. */
 @Composable
 private fun RowLine(
     title: String,

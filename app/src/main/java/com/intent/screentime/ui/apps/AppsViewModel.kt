@@ -4,8 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.intent.screentime.core.time.DayWindow
 import com.intent.screentime.data.local.entity.DailyAppUsageEntity
+import com.intent.screentime.data.local.entity.TargetEntity
+import com.intent.screentime.data.local.entity.TargetType
 import com.intent.screentime.data.repository.AppCategoryRef
 import com.intent.screentime.data.repository.UsageRepository
+import com.intent.screentime.data.stats.AppUsageInsight
+import com.intent.screentime.data.stats.AppUsageInsights
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +25,7 @@ data class AppListRow(
     val category: AppCategoryRef?,
     /** The last seven days, oldest first — the shape behind the sparkline. */
     val trend: List<Long>,
+    val insight: AppUsageInsight? = null,
 )
 
 data class AppsUiState(
@@ -46,22 +51,44 @@ class AppsViewModel(
 
     val state: StateFlow<AppsUiState> = combine(
         repository.observeAppUsage(today),
+        repository.observeTargets(),
         dataVersion,
-    ) { appUsage, _ -> appUsage }
-        .map { appUsage -> assemble(appUsage) }
+    ) { appUsage, targets, _ -> appUsage to targets }
+        .map { (appUsage, targets) -> assemble(appUsage, targets) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppsUiState())
 
-    private suspend fun assemble(appUsage: List<DailyAppUsageEntity>): AppsUiState {
+    private suspend fun assemble(
+        appUsage: List<DailyAppUsageEntity>,
+        targets: List<TargetEntity>,
+    ): AppsUiState {
         val categories = repository.categoryLookup()
         val trendByPackage = trendByPackage()
 
         val rows = appUsage.map { row ->
+            val trend = trendByPackage[row.packageName].orEmpty()
+            val previousDays = trend.dropLast(1).filter { it > 0L }
+            val averageMs = if (previousDays.isEmpty()) {
+                0L
+            } else {
+                previousDays.sum() / previousDays.size
+            }
+            val category = categories[row.packageName]
+            val capMinutes = targets.firstOrNull {
+                it.type == TargetType.PER_APP_DAILY_CAP && it.scopePackage == row.packageName
+            }?.valueMinutes
+
             AppListRow(
                 packageName = row.packageName,
                 totalMs = row.totalMs,
                 sessionCount = row.sessionCount,
-                category = categories[row.packageName],
-                trend = trendByPackage[row.packageName].orEmpty(),
+                category = category,
+                trend = trend,
+                insight = AppUsageInsights.forApp(
+                    todayMs = row.totalMs,
+                    averageMs = averageMs,
+                    capMinutes = capMinutes,
+                    category = category,
+                ),
             )
         }
 
