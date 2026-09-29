@@ -23,6 +23,14 @@ object Reasons {
         Option(BOREDOM, "Killing time"),
     )
 
+    /**
+     * The two reasons that describe an open nobody actually intended.
+     *
+     * The other two are legitimate uses of a phone, and counting them here would make the
+     * week-over-week figure say that answering a message is a failure.
+     */
+    val mindlessKeys: Set<String> = setOf(DRIFT, BOREDOM)
+
     /** Resolves a label to its key, for rows written before the key column existed. */
     fun keyForLabel(label: String): String? = OPTIONS.firstOrNull { it.label == label }?.key
 

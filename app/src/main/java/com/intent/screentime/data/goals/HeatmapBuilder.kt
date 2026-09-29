@@ -16,6 +16,7 @@ object HeatmapBuilder {
         val epochDay: Long,
         val metCap: Boolean,
         val metGoal: Boolean,
+        val metBedtime: Boolean,
         val hasData: Boolean,
         val isToday: Boolean,
     )
@@ -42,6 +43,7 @@ object HeatmapBuilder {
                     epochDay = epochDay,
                     metCap = row?.metCap ?: false,
                     metGoal = row?.metGoal ?: false,
+                    metBedtime = row?.metBedtime ?: false,
                     hasData = row != null,
                     isToday = epochDay == todayEpochDay,
                 )

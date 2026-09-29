@@ -51,6 +51,9 @@ class UsageRepository(
 
     fun observeTargets(): Flow<List<TargetEntity>> = database.targetDao().observeEnabled()
 
+    /** A one-shot read of the same rows, for screens that fold targets into a chart. */
+    suspend fun enabledTargets(): List<TargetEntity> = database.targetDao().enabled()
+
     fun observeStreak(limit: Int): Flow<List<StreakDayEntity>> =
         database.streakDayDao().observeRecent(limit)
 
@@ -76,10 +79,53 @@ class UsageRepository(
         return HourlyBreakdown.of(sessions, epochDay, kinds)
     }
 
+    /**
+     * One app's own day, hour by hour.
+     *
+     * Filtered in Kotlin rather than SQL: a single day is a handful of sessions, and the
+     * bucketing already has to happen here because a session can straddle several hours.
+     */
+    suspend fun appHourlyBuckets(
+        packageName: String,
+        epochDay: Long,
+    ): List<HourlyBreakdown.Bucket> = HourlyBreakdown.of(
+        sessions = sessionsForDay(epochDay).filter { it.packageName == packageName },
+        epochDay = epochDay,
+    )
+
+    /**
+     * Day summaries over an arbitrary window, for averages that must not follow the
+     * range the user is currently looking at.
+     */
+    suspend fun summariesBetween(fromDay: Long, toDay: Long): List<DailySummaryEntity> =
+        database.dailySummaryDao().between(fromDay, toDay)
+
     suspend fun sessionsForDay(epochDay: Long) = database.appSessionDao().sessionsOverlapping(
         DayWindow.startOfDayMs(epochDay),
         DayWindow.endOfDayMs(epochDay),
     )
+
+    /**
+     * The same 24-hour shape as [hourlyBuckets], summed over a window.
+     *
+     * One read for the whole range: a window is at most ninety days of sessions, and the
+     * bucketing already has to happen here because sessions straddle hours and days.
+     */
+    suspend fun hourlyBucketsForRange(fromDay: Long, toDay: Long): List<HourlyBreakdown.Bucket> {
+        val sessions = sessionsBetween(
+            DayWindow.startOfDayMs(fromDay),
+            DayWindow.endOfDayMs(toDay),
+        )
+        val kinds = categoryLookup().mapValues { it.value.kind }
+        return HourlyBreakdown.ofRange(sessions, fromDay, toDay, kinds)
+    }
+
+    /** The first day ever tracked, for bounding how far a window can step back. */
+    suspend fun earliestTrackedDay(): Long? = database.dailySummaryDao().earliestDay()
+
+    /** The first day an app was ever used, for the same bound on its own screen. */
+    suspend fun earliestDayFor(packageName: String): Long? =
+        database.dailyAppUsageDao().earliestDayFor(packageName)
 
     suspend fun recentSummaries(limit: Int): List<DailySummaryEntity> =
         database.dailySummaryDao().recent(limit)
@@ -119,6 +165,15 @@ class UsageRepository(
         database.streakDayDao().recent(limit)
 
     /**
+     * The day verdicts inside a window, for screens that judge a range rather than a day.
+     *
+     * Verdicts are only kept for the recent past — the nightly pass re-judges sixty days —
+     * so a window older than that comes back empty rather than wrong.
+     */
+    suspend fun streakRowsBetween(fromDay: Long, toDay: Long): List<StreakDayEntity> =
+        database.streakDayDao().between(fromDay, toDay)
+
+    /**
      * Creates, moves or clears a target. Passing null minutes removes it.
      *
      * One entry point for all five target types rather than five near-identical setters,
@@ -145,6 +200,32 @@ class UsageRepository(
 
     suspend fun setPerAppCap(packageName: String, minutes: Int?) =
         setTarget(TargetType.PER_APP_DAILY_CAP, minutes, scopePackage = packageName)
+
+    /**
+     * The bedtime window. A pair of times rather than a duration, which is why it does not
+     * fit [setTarget]'s one-value shape.
+     *
+     * Both ends or neither: a window with one end is not a commitment, so a half-set value
+     * clears the row rather than storing something the evaluator would have to guess at.
+     */
+    suspend fun setBedtime(startMinutesOfDay: Int?, endMinutesOfDay: Int?) {
+        val dao = database.targetDao()
+        val existing = dao.enabled().firstOrNull { it.type == TargetType.BEDTIME_WINDOW }
+
+        if (startMinutesOfDay == null || endMinutesOfDay == null) {
+            if (existing != null) dao.delete(existing)
+            return
+        }
+
+        val row = TargetEntity(
+            type = TargetType.BEDTIME_WINDOW,
+            // Unused on this row type: a bedtime is a window, not an amount.
+            valueMinutes = 0,
+            startMinutesOfDay = startMinutesOfDay,
+            endMinutesOfDay = endMinutesOfDay,
+        )
+        if (existing != null) dao.upsert(row.copy(id = existing.id)) else dao.insert(row)
+    }
 
     // --- per-app history ---------------------------------------------------
 
@@ -243,6 +324,10 @@ class UsageRepository(
         database.dayNoteDao().observe(epochDay)
 
     suspend fun dayNote(epochDay: Long): DayNoteEntity? = database.dayNoteDao().get(epochDay)
+
+    /** Notes + reflections for every day in a range, for period exports. */
+    suspend fun dayNotesBetween(fromDay: Long, toDay: Long) =
+        database.dayNoteDao().between(fromDay, toDay)
 
     /**
      * Both day-note setters read before they write. A blind upsert of a fresh entity would

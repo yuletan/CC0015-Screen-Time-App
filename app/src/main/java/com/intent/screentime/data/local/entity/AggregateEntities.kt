@@ -27,6 +27,16 @@ data class DailySummaryEntity(
     val unlockCount: Int,
     val productionMs: Long,
     val consumptionMs: Long,
+    /**
+     * Focus time: the union of completed timer sessions and detected stretches in work
+     * apps, so the timer and the detector covering the same minutes count once.
+     */
     val focusMs: Long,
+    /**
+     * The part of [focusMs] the stretch detector added beyond the timer. Reported
+     * separately so the figure can say where it came from instead of appearing from
+     * nowhere on a day the user never started a session.
+     */
+    val autoFocusMs: Long = 0,
     val topPackage: String?,
 )

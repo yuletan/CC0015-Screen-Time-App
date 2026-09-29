@@ -7,11 +7,13 @@ import org.junit.Test
 
 class AppCategoryMappingTest {
 
+    private val plainPackage = "com.example.plain"
+
     @Test
     fun `android productivity maps to production`() {
         assertEquals(
             DefaultCategories.PRODUCTION,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_PRODUCTIVITY),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_PRODUCTIVITY),
         )
     }
 
@@ -19,7 +21,7 @@ class AppCategoryMappingTest {
     fun `social maps to the social category`() {
         assertEquals(
             DefaultCategories.SOCIAL,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_SOCIAL),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_SOCIAL),
         )
     }
 
@@ -27,11 +29,11 @@ class AppCategoryMappingTest {
     fun `video and audio both map to video`() {
         assertEquals(
             DefaultCategories.VIDEO,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_VIDEO),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_VIDEO),
         )
         assertEquals(
             DefaultCategories.VIDEO,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_AUDIO),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_AUDIO),
         )
     }
 
@@ -39,7 +41,7 @@ class AppCategoryMappingTest {
     fun `games map to games`() {
         assertEquals(
             DefaultCategories.GAMES,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_GAME),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_GAME),
         )
     }
 
@@ -47,7 +49,7 @@ class AppCategoryMappingTest {
     fun `news maps to news and feeds`() {
         assertEquals(
             DefaultCategories.NEWS,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_NEWS),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_NEWS),
         )
     }
 
@@ -55,11 +57,61 @@ class AppCategoryMappingTest {
     fun `maps and image tools are utility rather than either side of the split`() {
         assertEquals(
             DefaultCategories.UTILITY,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_MAPS),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_MAPS),
         )
         assertEquals(
             DefaultCategories.UTILITY,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_IMAGE),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_IMAGE),
+        )
+    }
+
+    @Test
+    fun `document apps are deep work whatever Android calls them`() {
+        // Google's Docs, Sheets, Slides and Drive all ship as one package, and Android
+        // does not give it a reliable category — the package name is the fact, so it has
+        // to win over an undefined, social or utility label.
+        assertEquals(
+            DefaultCategories.PRODUCTION,
+            AppCategoryMapping.defaultCategoryId(
+                "com.google.android.apps.docs",
+                ApplicationInfo.CATEGORY_UNDEFINED,
+            ),
+        )
+        assertEquals(
+            DefaultCategories.PRODUCTION,
+            AppCategoryMapping.defaultCategoryId(
+                "com.microsoft.office.word",
+                ApplicationInfo.CATEGORY_SOCIAL,
+            ),
+        )
+        assertEquals(
+            DefaultCategories.PRODUCTION,
+            AppCategoryMapping.defaultCategoryId(
+                "com.microsoft.office.excel",
+                ApplicationInfo.CATEGORY_VIDEO,
+            ),
+        )
+        assertEquals(
+            DefaultCategories.PRODUCTION,
+            AppCategoryMapping.defaultCategoryId(
+                "notion.id",
+                ApplicationInfo.CATEGORY_UNDEFINED,
+            ),
+        )
+        assertEquals(
+            DefaultCategories.PRODUCTION,
+            AppCategoryMapping.defaultCategoryId(
+                "com.adobe.reader",
+                ApplicationInfo.CATEGORY_MAPS,
+            ),
+        )
+    }
+
+    @Test
+    fun `a package outside the document list still follows Android's category`() {
+        assertEquals(
+            DefaultCategories.SOCIAL,
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_SOCIAL),
         )
     }
 
@@ -67,7 +119,7 @@ class AppCategoryMappingTest {
     fun `an undefined category falls back to uncategorised`() {
         assertEquals(
             DefaultCategories.UNCATEGORIZED,
-            AppCategoryMapping.defaultCategoryId(ApplicationInfo.CATEGORY_UNDEFINED),
+            AppCategoryMapping.defaultCategoryId(plainPackage, ApplicationInfo.CATEGORY_UNDEFINED),
         )
     }
 
@@ -75,7 +127,7 @@ class AppCategoryMappingTest {
     fun `an unknown category value falls back to uncategorised`() {
         assertEquals(
             DefaultCategories.UNCATEGORIZED,
-            AppCategoryMapping.defaultCategoryId(Int.MIN_VALUE),
+            AppCategoryMapping.defaultCategoryId(plainPackage, Int.MIN_VALUE),
         )
     }
 }

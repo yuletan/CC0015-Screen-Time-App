@@ -1,5 +1,7 @@
 package com.intent.screentime.data.goals
 
+import com.intent.screentime.core.time.DayWindow
+import com.intent.screentime.data.local.entity.AppSessionEntity
 import com.intent.screentime.data.local.entity.DailyAppUsageEntity
 import com.intent.screentime.data.local.entity.DailySummaryEntity
 import com.intent.screentime.data.local.entity.StreakDayEntity
@@ -9,12 +11,39 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneId
 
 class StreakEvaluatorTest {
 
     private val minute = 60_000L
     private val hour = 60 * minute
     private val day0 = 20_000L
+    private val utc = ZoneId.of("UTC")
+
+    private fun bedtimeTarget(startHour: Int, endHour: Int) = TargetEntity(
+        type = TargetType.BEDTIME_WINDOW,
+        valueMinutes = 0,
+        startMinutesOfDay = startHour * 60,
+        endMinutesOfDay = endHour * 60,
+    )
+
+    private fun nightSession(
+        epochDay: Long,
+        startHour: Int,
+        startMinute: Int,
+        minutes: Long,
+        packageName: String = "app.social",
+    ): AppSessionEntity {
+        val start = DayWindow.startOfDayMs(epochDay, utc) +
+            startHour * hour + startMinute * minute
+        return AppSessionEntity(
+            packageName = packageName,
+            startMs = start,
+            endMs = start + minutes * minute,
+            durationMs = minutes * minute,
+            dayEpochDay = epochDay,
+        )
+    }
 
     private fun summary(
         epochDay: Long,
@@ -192,5 +221,116 @@ class StreakEvaluatorTest {
         assertEquals(7, StreakEvaluator.milestoneReached(9))
         assertEquals(30, StreakEvaluator.milestoneReached(45))
         assertEquals(null, StreakEvaluator.milestoneReached(2))
+    }
+
+    @Test
+    fun `no bedtime window set means no night can fail`() {
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = listOf(summary(day0, screenTimeMs = hour)),
+            usageByDay = emptyMap(),
+            targets = GoalTargets.from(listOf(target(TargetType.DAILY_SCREEN_TIME_CAP, 240))),
+        )
+
+        assertTrue(outcomes.single().metBedtime)
+        assertEquals(0L, outcomes.single().bedtimeUsedMs)
+    }
+
+    @Test
+    fun `a scroll in the small hours is charged to the evening before it`() {
+        val targets = GoalTargets.from(listOf(bedtimeTarget(startHour = 23, endHour = 7)))
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = listOf(summary(day0, screenTimeMs = hour)),
+            usageByDay = emptyMap(),
+            sessions = listOf(nightSession(day0 + 1, startHour = 1, startMinute = 30, minutes = 30)),
+            targets = targets,
+            nowMs = DayWindow.startOfDayMs(day0 + 2, utc) + 9 * hour,
+            zone = utc,
+        )
+
+        // Filing it under the day it started would have let every night look clean,
+        // because the damage always happens after midnight.
+        assertFalse(outcomes.single().metBedtime)
+        assertEquals(30 * minute, outcomes.single().bedtimeUsedMs)
+    }
+
+    @Test
+    fun `a session in the evening is not also charged to the following night`() {
+        val targets = GoalTargets.from(listOf(bedtimeTarget(startHour = 23, endHour = 7)))
+        val evening = nightSession(day0, startHour = 23, startMinute = 30, minutes = 20)
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = listOf(
+                summary(day0, screenTimeMs = hour),
+                summary(day0 + 1, screenTimeMs = hour),
+            ),
+            usageByDay = emptyMap(),
+            sessions = listOf(evening),
+            targets = targets,
+            nowMs = DayWindow.startOfDayMs(day0 + 2, utc) + 9 * hour,
+            zone = utc,
+        )
+
+        assertFalse(outcomes.first { it.epochDay == day0 }.metBedtime)
+
+        // The next day's window does not open until that evening, so the same session is
+        // not counted twice.
+        val nextNight = outcomes.first { it.epochDay == day0 + 1 }
+        assertTrue(nextNight.metBedtime)
+        assertEquals(0L, nextNight.bedtimeUsedMs)
+    }
+
+    @Test
+    fun `a night spent on the phone fails the day even when the cap held`() {
+        val targets = GoalTargets.from(
+            listOf(
+                target(TargetType.DAILY_SCREEN_TIME_CAP, 240),
+                bedtimeTarget(startHour = 23, endHour = 7),
+            ),
+        )
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = listOf(summary(day0, screenTimeMs = hour)),
+            usageByDay = emptyMap(),
+            sessions = listOf(nightSession(day0, 23, 30, minutes = 40)),
+            targets = targets,
+            nowMs = DayWindow.startOfDayMs(day0 + 1, utc) + 9 * hour,
+            zone = utc,
+        )
+
+        assertTrue(outcomes.single().metCap)
+        assertFalse(outcomes.single().metBedtime)
+        assertEquals(40 * minute, outcomes.single().bedtimeUsedMs)
+    }
+
+    @Test
+    fun `a night still open when the pass runs is judged only on what has happened`() {
+        val targets = GoalTargets.from(listOf(bedtimeTarget(startHour = 23, endHour = 7)))
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = listOf(summary(day0, screenTimeMs = hour)),
+            usageByDay = emptyMap(),
+            sessions = listOf(nightSession(day0, 23, 50, minutes = 70)),
+            targets = targets,
+            // Half past midnight: the window is still running, so only the forty minutes up
+            // to now count rather than the seventy the stored row records.
+            nowMs = DayWindow.startOfDayMs(day0 + 1, utc) + 30 * minute,
+            zone = utc,
+        )
+
+        assertEquals(40 * minute, outcomes.single().bedtimeUsedMs)
+        assertFalse(outcomes.single().metBedtime)
+    }
+
+    @Test
+    fun `a held night keeps the day and the score's bedtime row`() {
+        val targets = GoalTargets.from(listOf(bedtimeTarget(startHour = 23, endHour = 7)))
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = listOf(summary(day0, screenTimeMs = hour)),
+            usageByDay = emptyMap(),
+            sessions = listOf(nightSession(day0, 23, 0, minutes = 3)),
+            targets = targets,
+            nowMs = DayWindow.startOfDayMs(day0 + 1, utc) + 9 * hour,
+            zone = utc,
+        )
+
+        assertTrue(outcomes.single().metBedtime)
+        assertEquals(3 * minute, outcomes.single().bedtimeUsedMs)
     }
 }

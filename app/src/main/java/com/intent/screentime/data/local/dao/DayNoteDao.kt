@@ -15,6 +15,9 @@ interface DayNoteDao {
     @Query("SELECT * FROM day_note WHERE dayEpochDay = :dayEpochDay")
     fun observe(dayEpochDay: Long): Flow<DayNoteEntity?>
 
+    @Query("SELECT * FROM day_note WHERE dayEpochDay BETWEEN :fromDay AND :toDay ORDER BY dayEpochDay ASC")
+    suspend fun between(fromDay: Long, toDay: Long): List<DayNoteEntity>
+
     @Upsert
     suspend fun upsert(row: DayNoteEntity)
 }

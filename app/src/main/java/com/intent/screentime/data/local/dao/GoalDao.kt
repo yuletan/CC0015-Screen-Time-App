@@ -48,12 +48,17 @@ interface FocusSessionDao {
     @Query("SELECT COALESCE(SUM(endMs - startMs), 0) FROM focus_session WHERE startMs >= :fromMs AND endMs IS NOT NULL")
     suspend fun totalMsSince(fromMs: Long): Long
 
-    /** Focus time that falls inside a window, clipping sessions that straddle its edges. */
+    /**
+     * Sessions overlapping a window, including ones that straddle its edges.
+     *
+     * Rows rather than a sum, because the day's focus figure is a union of these with the
+     * stretch detector's finds — a total alone cannot be merged with anything.
+     */
     @Query(
-        "SELECT COALESCE(SUM(MIN(endMs, :toMs) - MAX(startMs, :fromMs)), 0) FROM focus_session " +
-            "WHERE endMs IS NOT NULL AND startMs < :toMs AND endMs > :fromMs",
+        "SELECT * FROM focus_session WHERE endMs IS NOT NULL " +
+            "AND startMs < :toMs AND endMs > :fromMs",
     )
-    suspend fun totalMsBetween(fromMs: Long, toMs: Long): Long
+    suspend fun overlapping(fromMs: Long, toMs: Long): List<FocusSessionEntity>
 }
 
 @Dao

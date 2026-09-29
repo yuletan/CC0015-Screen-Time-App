@@ -25,6 +25,8 @@ class GoalTracker(
     private val preferences: UserPreferences,
     private val notifier: NotificationHelper,
     private val labelOf: (String) -> String,
+    /** Our own app, the system UI and the launcher: the set screen time excludes. */
+    private val excludedPackages: Set<String> = emptySet(),
 ) {
 
     data class RollupReport(
@@ -47,8 +49,21 @@ class GoalTracker(
         val usageByDay = summaries.associate { summary ->
             summary.dayEpochDay to database.dailyAppUsageDao().forDay(summary.dayEpochDay)
         }
+        // Passed whole rather than filed by day: a night opens on one day and closes the
+        // next morning, so the small hours belong to the evening before them and only the
+        // window's own bounds can say which night a session is that night's business.
+        val sessions = database.appSessionDao()
+            .sessionsOverlapping(DayWindow.startOfDayMs(fromDay), DayWindow.endOfDayMs(toDay))
+
         val targets = GoalTargets.from(database.targetDao().enabled())
-        val outcomes = StreakEvaluator.evaluate(summaries, usageByDay, targets)
+        val outcomes = StreakEvaluator.evaluate(
+            summaries = summaries,
+            usageByDay = usageByDay,
+            sessions = sessions,
+            targets = targets,
+            excludedPackages = excludedPackages,
+            nowMs = System.currentTimeMillis(),
+        )
 
         database.withTransaction {
             for (outcome in outcomes) {
@@ -57,6 +72,8 @@ class GoalTracker(
                         dayEpochDay = outcome.epochDay,
                         metCap = outcome.metCap,
                         metGoal = outcome.metGoal,
+                        bedtimeUsedMs = outcome.bedtimeUsedMs,
+                        metBedtime = outcome.metBedtime,
                         score = outcome.score,
                         productionMs = outcome.productionMs,
                     ),

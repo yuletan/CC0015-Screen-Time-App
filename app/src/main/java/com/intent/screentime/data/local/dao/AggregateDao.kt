@@ -49,6 +49,10 @@ interface DailyAppUsageDao {
 
     @Query("SELECT COALESCE(SUM(totalMs), 0) FROM daily_app_usage WHERE dayEpochDay = :dayEpochDay")
     suspend fun totalForDay(dayEpochDay: Long): Long
+
+    /** The first day this app was ever used, for bounding its own lookback. */
+    @Query("SELECT MIN(dayEpochDay) FROM daily_app_usage WHERE packageName = :packageName")
+    suspend fun earliestDayFor(packageName: String): Long?
 }
 
 @Dao
@@ -73,4 +77,8 @@ interface DailySummaryDao {
 
     @Query("SELECT * FROM daily_summary ORDER BY dayEpochDay DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<DailySummaryEntity>
+
+    /** The first day ever tracked, for bounding how far back a window can step. */
+    @Query("SELECT MIN(dayEpochDay) FROM daily_summary")
+    suspend fun earliestDay(): Long?
 }

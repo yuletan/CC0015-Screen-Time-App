@@ -181,6 +181,30 @@ class UsageIngestor(
     }
 
     /**
+     * Re-asks the classifier about every row it — not the user — filled in, and re-scores
+     * recent history when anything moved.
+     *
+     * [resolveCategories] never re-examines a stored row, which is what keeps harvests
+     * cheap: an app is classified once, ever. That also means an improved mapping would
+     * otherwise only reach apps the user had never opened, so the app calls this once per
+     * classifier version bump. Rows the user set are left exactly as they are.
+     *
+     * Returns how many packages changed category.
+     */
+    suspend fun reclassifyAutoCategories(): Int {
+        val auto = database.categoryDao().allAppCategories().filterNot { it.isUserOverride }
+        val moved = auto.mapNotNull { row ->
+            val fresh = classifier.categoryIdFor(row.packageName)
+            if (fresh == row.categoryId) null else row.copy(categoryId = fresh)
+        }
+        if (moved.isEmpty()) return 0
+
+        database.categoryDao().upsertAppCategories(moved)
+        reaggregateFrom(DayWindow.todayEpochDay() - RECLASSIFY_RESCORE_DAYS)
+        return moved.size
+    }
+
+    /**
      * Recomputes the daily aggregate rows for every day touched by [sessions].
      *
      * The per-app totals are rebuilt from **all** sessions overlapping each day, read
@@ -216,7 +240,23 @@ class UsageIngestor(
                 excludedPackages = excludedPackages,
             )
             val unlockCount = dataSource.unlockCount(dayStart, dayEnd)
-            val focusMs = database.focusSessionDao().totalMsBetween(dayStart, dayEnd)
+
+            // Focus is what the timer claimed *and* what the screen shows: a long
+            // uninterrupted stretch in a work app counts even with no session running.
+            // The two can cover the same minutes, so the day's figure is their union and
+            // only the detector's extra is attributed to it.
+            val manualFocus = FocusStretches.manual(
+                sessions = database.focusSessionDao().overlapping(dayStart, dayEnd),
+                epochDay = day,
+            )
+            val detectedFocus = FocusStretches.detected(
+                sessions = overlapping,
+                epochDay = day,
+                kindByPackage = kindByPackage,
+                excludedPackages = excludedPackages,
+            )
+            val focusMs = FocusStretches.unionMs(manualFocus + detectedFocus)
+            val autoFocusMs = focusMs - FocusStretches.unionMs(manualFocus)
 
             val summary = DailyAggregator.summarize(
                 epochDay = day,
@@ -224,6 +264,7 @@ class UsageIngestor(
                 kindByPackage = kindByPackage,
                 unlockCount = unlockCount,
                 focusMs = focusMs,
+                autoFocusMs = autoFocusMs,
             )
 
             Log.d(
@@ -304,6 +345,9 @@ class UsageIngestor(
 
         /** How far back sessions are rebuilt from our own event log each run. */
         private const val SESSION_REBUILD_WINDOW_MS = 3 * DAY
+
+        /** How far back a re-classification re-scores, matching a manual re-sort's window. */
+        private const val RECLASSIFY_RESCORE_DAYS = 30L
 
         /**
          * Earliest timestamp sessions must be rebuilt from.

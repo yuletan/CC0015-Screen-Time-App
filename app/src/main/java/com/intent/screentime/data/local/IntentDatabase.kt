@@ -44,7 +44,7 @@ import com.intent.screentime.data.local.entity.UsageEventEntity
         IntentLogEntity::class,
         DayNoteEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -119,9 +119,48 @@ abstract class IntentDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds detected focus to the daily summary.
+         *
+         * Defaults to zero for existing rows and rebuilds are not run inside the
+         * migration: on the next launch the app re-aggregates stored history once, so
+         * past days carry the new definition of "focused" too.
+         */
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `daily_summary` ADD COLUMN `autoFocusMs` INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
+        /**
+         * Adds the bedtime window to the target table and the night's verdict to the streak
+         * row.
+         *
+         * Both new target columns are nullable, so no default is needed and no table is
+         * rebuilt. `metBedtime` defaults to false, which is a claim about nights that were
+         * never judged — `IntentApp` re-judges the recent past once on first launch, so a
+         * day from before this version is not left marked as a night someone broke.
+         * `bedtimeUsedMs` defaults to zero for the same reason and is corrected by the same
+         * pass.
+         */
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `target` ADD COLUMN `startMinutesOfDay` INTEGER")
+                db.execSQL("ALTER TABLE `target` ADD COLUMN `endMinutesOfDay` INTEGER")
+                db.execSQL(
+                    "ALTER TABLE `streak_day` ADD COLUMN `metBedtime` INTEGER NOT NULL DEFAULT 0",
+                )
+                db.execSQL(
+                    "ALTER TABLE `streak_day` ADD COLUMN `bedtimeUsedMs` INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         fun build(context: Context): IntentDatabase =
             Room.databaseBuilder(context.applicationContext, IntentDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)

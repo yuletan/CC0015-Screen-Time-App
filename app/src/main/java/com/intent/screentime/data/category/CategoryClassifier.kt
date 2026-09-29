@@ -17,7 +17,7 @@ class CategoryClassifier(private val context: Context) {
     private val packageManager: PackageManager get() = context.packageManager
 
     fun categoryIdFor(packageName: String): String =
-        AppCategoryMapping.defaultCategoryId(appCategoryOf(packageName))
+        AppCategoryMapping.defaultCategoryId(packageName, appCategoryOf(packageName))
 
     private fun appCategoryOf(packageName: String): Int =
         try {

@@ -73,6 +73,10 @@ object DailyAggregator {
      * Total screen time is the sum of app time rather than screen-on time, so it
      * matches what the user sees in Digital Wellbeing. UTILITY and NEUTRAL time is
      * counted in screen time but in neither side of the production/consumption split.
+     *
+     * [focusMs] is the union of timer sessions and detected stretches; [autoFocusMs] is
+     * how much of it the detector contributed, and is carried so the UI can attribute it
+     * rather than showing focus time the user cannot account for.
      */
     fun summarize(
         epochDay: Long,
@@ -80,6 +84,7 @@ object DailyAggregator {
         kindByPackage: Map<String, CategoryKind>,
         unlockCount: Int,
         focusMs: Long,
+        autoFocusMs: Long = 0L,
     ): DailySummaryEntity {
         var productionMs = 0L
         var consumptionMs = 0L
@@ -99,6 +104,7 @@ object DailyAggregator {
             productionMs = productionMs,
             consumptionMs = consumptionMs,
             focusMs = focusMs,
+            autoFocusMs = autoFocusMs,
             topPackage = appUsage.maxByOrNull { it.totalMs }?.packageName,
         )
     }

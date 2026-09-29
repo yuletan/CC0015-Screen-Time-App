@@ -74,4 +74,35 @@ class HeatmapBuilderTest {
         assertTrue(cell.metCap)
         assertTrue(cell.metGoal)
     }
+
+    @Test
+    fun `the night's verdict reaches the cell as well as the cap's`() {
+        val yesterday = today - 1
+        val weeks = HeatmapBuilder.weeks(
+            rows = listOf(
+                StreakDayEntity(
+                    dayEpochDay = yesterday,
+                    metCap = false,
+                    metGoal = false,
+                    score = 40,
+                    productionMs = 0L,
+                    metBedtime = true,
+                    bedtimeUsedMs = 0L,
+                ),
+            ),
+            todayEpochDay = today,
+            weeks = 2,
+        )
+
+        val cell = weeks.flatten().single { it.epochDay == yesterday }
+        assertTrue(cell.metBedtime)
+        assertFalse(cell.metCap)
+    }
+
+    @Test
+    fun `a day with no row is not credited with a kept night`() {
+        val weeks = HeatmapBuilder.weeks(emptyList(), today, weeks = 2)
+
+        assertTrue(weeks.flatten().all { !it.metBedtime })
+    }
 }

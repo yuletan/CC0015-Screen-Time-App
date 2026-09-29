@@ -35,6 +35,9 @@ class UserPreferences(private val context: Context) {
         val LAST_MILESTONE_STREAK = intPreferencesKey("last_milestone_streak")
         val INTENT_PROMPT_ENABLED = booleanPreferencesKey("intent_prompt_enabled")
         val INTENT_WATCHED_PACKAGES = stringSetPreferencesKey("intent_watched_packages")
+        val FOCUS_BACKFILL_DONE = booleanPreferencesKey("focus_backfill_done")
+        val BEDTIME_BACKFILL_DONE = booleanPreferencesKey("bedtime_backfill_done")
+        val CLASSIFIER_VERSION = intPreferencesKey("classifier_version")
     }
 
     val ingestWatermarkMs: Flow<Long> = context.dataStore.data.map { it[Keys.INGEST_WATERMARK_MS] ?: 0L }
@@ -117,6 +120,47 @@ class UserPreferences(private val context: Context) {
 
     suspend fun setIntentWatchedPackages(value: Set<String>) {
         context.dataStore.edit { it[Keys.INTENT_WATCHED_PACKAGES] = value }
+    }
+
+    /**
+     * Whether stored history has been re-aggregated since focus gained stretch detection.
+     *
+     * One-time: days rolled up before that upgrade carry the timer-only figure, and a
+     * day the user can see on two screens has to agree with itself.
+     */
+    val focusBackfillDone: Flow<Boolean> =
+        context.dataStore.data.map { it[Keys.FOCUS_BACKFILL_DONE] ?: false }
+
+    suspend fun setFocusBackfillDone(value: Boolean) {
+        context.dataStore.edit { it[Keys.FOCUS_BACKFILL_DONE] = value }
+    }
+
+    /**
+     * Whether stored history has been judged since bedtime became a commitment.
+     *
+     * The migration's `DEFAULT 0` says every day before this version missed its bedtime,
+     * which is not a verdict anyone ever reached. One pass over the recent past replaces
+     * it with a real one.
+     */
+    val bedtimeBackfillDone: Flow<Boolean> =
+        context.dataStore.data.map { it[Keys.BEDTIME_BACKFILL_DONE] ?: false }
+
+    suspend fun setBedtimeBackfillDone(value: Boolean) {
+        context.dataStore.edit { it[Keys.BEDTIME_BACKFILL_DONE] = value }
+    }
+
+    /**
+     * The automatic classifier version stored app rows were last reconciled with.
+     *
+     * One-time, like the flags above, and for the same reason: a stored row is never
+     * re-asked, so a classifier upgrade has to be pushed through explicitly, and the
+     * stored version is what says whether that has happened yet.
+     */
+    val classifierVersion: Flow<Int> =
+        context.dataStore.data.map { it[Keys.CLASSIFIER_VERSION] ?: 0 }
+
+    suspend fun setClassifierVersion(value: Int) {
+        context.dataStore.edit { it[Keys.CLASSIFIER_VERSION] = value }
     }
 
     suspend fun currentWatermark(): Long = ingestWatermarkMs.first()
