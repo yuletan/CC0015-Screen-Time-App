@@ -76,17 +76,37 @@ data class DataColors(
     /** Sentiment, deliberately distinct from the category hues above. */
     val positive: Color,
     val negative: Color,
+    /**
+     * Three-step scale from settled to strained, for a single hour's usage. Separate from
+     * the category hues above because they answer a different question: not "what kind of
+     * time was that" but "how much of the hour did it take". The same green and red as
+     * production and consumption, so the app has one of each rather than four, with amber
+     * for the middle band that is neither a win nor a loss.
+     */
+    val calm: Color,
+    val watchful: Color,
+    val strained: Color,
+    /**
+     * The line a goal is drawn with. Ink rather than a data hue, on purpose: a target is
+     * an annotation about the data and not a series within it, and it must never be
+     * mistaken for a category or for a judgement about how the week went.
+     */
+    val target: Color,
     /** Ordered palette for multi-series charts and category legends. */
     val series: List<Color>,
 )
 
 private val LightDataColors = DataColors(
-    production = Color(0xFFC77A05),
-    consumption = Color(0xFFA62B84),
+    production = Color(0xFF136B4F),
+    consumption = Color(0xFFB3261E),
     utility = Color(0xFF4C6376),
     neutral = Color(0xFF75645D),
     positive = Color(0xFF136B4F),
     negative = Color(0xFFB3261E),
+    calm = Color(0xFF136B4F),
+    watchful = Color(0xFFC77A05),
+    strained = Color(0xFFB3261E),
+    target = Ink.n700,
     series = listOf(
         Color(0xFFD93B12),
         Color(0xFFC77A05),
@@ -100,12 +120,16 @@ private val LightDataColors = DataColors(
 )
 
 private val DarkDataColors = DataColors(
-    production = Color(0xFFFFC14D),
-    consumption = Color(0xFFE86CC4),
+    production = Color(0xFF6FD3A6),
+    consumption = Color(0xFFFF8A80),
     utility = Color(0xFF9DB4C8),
     neutral = Color(0xFFB5A49C),
     positive = Color(0xFF6FD3A6),
     negative = Color(0xFFFF8A80),
+    calm = Color(0xFF6FD3A6),
+    watchful = Color(0xFFFFC14D),
+    strained = Color(0xFFFF8A80),
+    target = Ink.n300,
     series = listOf(
         Color(0xFFFF7B52),
         Color(0xFFFFC14D),

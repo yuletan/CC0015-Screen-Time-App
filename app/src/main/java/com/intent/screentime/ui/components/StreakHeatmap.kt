@@ -30,19 +30,26 @@ import java.time.format.DateTimeFormatter
 /**
  * A calendar of the last twelve weeks, one square per day.
  *
- * Three states worth distinguishing, and they are distinguished by more than hue:
- * a day that honoured both cap and goal, a day that honoured the cap but missed the
- * production goal, and a day that went over. Empty squares are days before tracking
- * began, drawn as absence rather than failure.
+ * How many states a square distinguishes depends on how many commitments the user has
+ * actually made, which is why [hasBedtime] is a parameter rather than something the cells
+ * could work out for themselves. Once a quiet window exists, four states are worth seeing:
+ * both held, the cap alone, the night alone, and neither. Before one exists, a day that
+ * reads "inside bedtime" is describing a commitment nobody made — so the grid falls back
+ * to the two it has always reported, the cap and the production goal.
  *
- * Passing [onCellClick] turns the squares into doors: a day that has data, or today,
- * opens its card, and every cell carries a spoken description either way so the grid
- * means the same thing to a screen reader as it does to the eye.
+ * The production goal is deliberately *not* part of the four-state fill. Three commitments
+ * is eight combinations and a square this size cannot carry them; the goal is still judged,
+ * still described, and still on the day card.
+ *
+ * Passing [onCellClick] turns the squares into doors: a day that has data, or today, opens
+ * its card, and every cell carries a spoken description either way so the grid means the
+ * same thing to a screen reader as it does to the eye.
  */
 @Composable
 fun StreakHeatmap(
     weeks: List<List<HeatmapBuilder.Cell>>,
     modifier: Modifier = Modifier,
+    hasBedtime: Boolean = false,
     onCellClick: ((Long) -> Unit)? = null,
 ) {
     val data = dataColors
@@ -66,8 +73,16 @@ fun StreakHeatmap(
                         // twelve-week grid reading as a blank card and hides the fact that
                         // the days are tappable at all.
                         !filled -> Color.Transparent
-                        cell.metCap && cell.metGoal -> data.production
+
+                        !hasBedtime -> when {
+                            cell.metCap && cell.metGoal -> data.calm
+                            cell.metCap -> scheme.primary
+                            else -> scheme.surfaceContainerHighest
+                        }
+
+                        cell.metCap && cell.metBedtime -> data.calm
                         cell.metCap -> scheme.primary
+                        cell.metBedtime -> data.watchful
                         else -> scheme.surfaceContainerHighest
                     }
 
@@ -94,7 +109,7 @@ fun StreakHeatmap(
                                 Modifier
                             },
                         )
-                        .semantics { contentDescription = describe(cell) }
+                        .semantics { contentDescription = describe(cell, hasBedtime) }
 
                     Box(cellModifier)
                 }
@@ -108,34 +123,81 @@ fun StreakHeatmap(
  * description is what carries it for everyone else, and it is deliberately worded the
  * same way the legend is.
  */
-private fun describe(cell: HeatmapBuilder.Cell): String {
+private fun describe(cell: HeatmapBuilder.Cell, hasBedtime: Boolean): String {
     val date = LocalDate.ofEpochDay(cell.epochDay).format(DAY_LABEL)
     val outcome = when {
         !cell.hasData -> "no data"
-        cell.metCap && cell.metGoal -> "inside the cap and the goal"
-        cell.metCap -> "inside the cap"
-        else -> "over the cap"
+
+        !hasBedtime -> when {
+            cell.metCap && cell.metGoal -> "inside the cap and the goal"
+            cell.metCap -> "inside the cap"
+            else -> "over the cap"
+        }
+
+        cell.metCap && cell.metBedtime -> "inside the cap and before bedtime"
+        cell.metCap -> "inside the cap, past bedtime"
+        cell.metBedtime -> "over the cap, inside bedtime"
+        else -> "over the cap and past bedtime"
     }
     return if (cell.isToday) "$date, today, $outcome" else "$date, $outcome"
 }
 
 private val DAY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d MMMM")
 
-/** The legend under the heatmap. Colour is always paired with a word. */
+/**
+ * The legend under the heatmap. Colour is always paired with a word.
+ *
+ * Two rows rather than one once bedtime is in play: four entries do not fit across a
+ * phone, and a legend that wraps mid-label is worse than no legend at all.
+ */
 @Composable
-fun StreakHeatmapLegend(modifier: Modifier = Modifier) {
+fun StreakHeatmapLegend(
+    modifier: Modifier = Modifier,
+    hasBedtime: Boolean = false,
+) {
     val data = dataColors
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(3.dp)
 
-    Row(
+    if (!hasBedtime) {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendEntry(color = data.calm, label = "Cap + goal", shape = shape)
+            LegendEntry(color = scheme.primary, label = "Cap only", shape = shape)
+            LegendEntry(
+                color = scheme.surfaceContainerHighest,
+                label = "Over cap",
+                shape = shape,
+            )
+        }
+        return
+    }
+
+    Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
-        LegendEntry(color = data.production, label = "Cap + goal", shape = shape)
-        LegendEntry(color = scheme.primary, label = "Cap only", shape = shape)
-        LegendEntry(color = scheme.surfaceContainerHighest, label = "Over cap", shape = shape)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendEntry(color = data.calm, label = "Cap + bedtime", shape = shape)
+            LegendEntry(color = scheme.primary, label = "Cap only", shape = shape)
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendEntry(color = data.watchful, label = "Bedtime only", shape = shape)
+            LegendEntry(
+                color = scheme.surfaceContainerHighest,
+                label = "Neither",
+                shape = shape,
+            )
+        }
     }
 }
 

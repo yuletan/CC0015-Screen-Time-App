@@ -12,15 +12,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
 import com.intent.screentime.ui.theme.Motion
 import com.intent.screentime.ui.theme.Spacing
+import kotlin.math.roundToInt
 
 data class SplitSegment(
     val label: String,
@@ -42,10 +44,10 @@ fun SplitBar(
     barHeight: Dp = 14.dp,
 ) {
     val visible = segments.filter { it.ms > 0L }
-    val total = visible.sumOf { it.ms }.toFloat()
+    val total = visible.sumOf { it.ms }
 
     val reveal by animateFloatAsState(
-        targetValue = if (total > 0f) 1f else 0f,
+        targetValue = if (total > 0L) 1f else 0f,
         animationSpec = tween(durationMillis = Motion.ENTER_MS, easing = Motion.expoOut),
         label = "splitReveal",
     )
@@ -57,18 +59,14 @@ fun SplitBar(
                 .height(barHeight)
                 .clip(CircleShape),
         ) {
-            if (total <= 0f) return@Canvas
-            val gap = 1.5.dp.toPx()
+            if (total <= 0L) return@Canvas
             var x = 0f
-            visible.forEachIndexed { index, segment ->
-                val isLast = index == visible.lastIndex
-                val width = (segment.ms / total) * size.width * reveal
-                val drawn = if (isLast) width else (width - gap).coerceAtLeast(0f)
-                drawRoundRect(
+            visible.forEach { segment ->
+                val width = (segment.ms.toFloat() / total.toFloat()) * size.width * reveal
+                drawRect(
                     color = segment.color,
                     topLeft = Offset(x, 0f),
-                    size = Size(drawn, size.height),
-                    cornerRadius = CornerRadius(size.height / 2f),
+                    size = Size(width, size.height),
                 )
                 x += width
             }
@@ -76,10 +74,15 @@ fun SplitBar(
 
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             visible.forEach { segment ->
+                val percent = (segment.ms.toDouble() / total.toDouble() * 100.0).roundToInt()
                 LegendItem(
                     color = segment.color,
                     label = segment.label,
-                    value = DurationFormat.compact(segment.ms),
+                    value = "${DurationFormat.compact(segment.ms)} · $percent%",
+                    modifier = Modifier.semantics {
+                        contentDescription = "${segment.label}: " +
+                            "${DurationFormat.compact(segment.ms)}, $percent percent of tracked time"
+                    },
                 )
             }
         }

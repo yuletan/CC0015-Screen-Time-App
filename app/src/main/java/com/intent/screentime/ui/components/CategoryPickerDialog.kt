@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.data.local.entity.CategoryEntity
-import com.intent.screentime.ui.apps.label
+import com.intent.screentime.ui.components.displayLabel
 import com.intent.screentime.ui.theme.Spacing
 import com.intent.screentime.ui.theme.toComposeColor
 
@@ -80,13 +80,17 @@ fun CategoryPickerDialog(
                                     .background(category.colorHex.toComposeColor()),
                             )
                             Text(
-                                text = category.name,
+                                text = if (category.id == "uncategorized") "Unsorted" else category.name,
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                text = category.kind.label(),
+                                text = if (category.id == "uncategorized") {
+                                    "Not sorted"
+                                } else {
+                                    category.kind.displayLabel()
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

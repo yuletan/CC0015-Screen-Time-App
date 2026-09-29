@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.intent.screentime.core.format.DurationFormat
+import com.intent.screentime.data.local.DefaultCategories
 import com.intent.screentime.data.local.entity.CategoryKind
 import com.intent.screentime.ui.theme.DataColors
 import com.intent.screentime.ui.theme.Spacing
@@ -52,12 +53,17 @@ fun SectionEyebrow(text: String, modifier: Modifier = Modifier) {
  * Used deliberately and sparingly: a panel exists only where a group of content is
  * genuinely a unit. Panels are never nested, because a panel inside a panel is just
  * decoration with a border.
+ *
+ * [actions] sits in the header, outside the body, which is what lets a panel's body be
+ * captured on its own: a share button in the header cannot end up in the picture it takes.
  */
 @Composable
 fun Panel(
     modifier: Modifier = Modifier,
     title: String? = null,
+    subtitle: String? = null,
     color: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    actions: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Surface(
@@ -69,8 +75,26 @@ fun Panel(
             modifier = Modifier.padding(Spacing.md),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm),
         ) {
-            if (title != null) {
-                SectionEyebrow(title)
+            if (title != null || actions != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    if (title != null) {
+                        SectionEyebrow(title, modifier = Modifier.weight(1f))
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
+                    actions?.invoke()
+                }
+            }
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             content()
         }
@@ -127,8 +151,14 @@ fun DeltaPill(
 fun CategoryChip(
     name: String,
     color: Color,
+    kind: CategoryKind? = null,
+    categoryId: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    val isUnsorted = categoryId == DefaultCategories.UNCATEGORIZED
+    val displayName = if (isUnsorted) "Unsorted" else name
+    val label = if (isUnsorted) displayName else kind?.let { "$displayName · ${it.displayLabel()}" } ?: displayName
+
     Surface(
         modifier = modifier,
         shape = CircleShape,
@@ -141,7 +171,7 @@ fun CategoryChip(
         ) {
             Box(Modifier.size(7.dp).background(color, CircleShape))
             Text(
-                text = name,
+                text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = color,
             )
@@ -268,6 +298,13 @@ fun StatTile(
  * Centralised so the timeline strip, the donut, the chips and the split bar can never
  * drift apart on what "consumption" looks like.
  */
+fun CategoryKind.displayLabel(): String = when (this) {
+    CategoryKind.PRODUCTION -> "Producing"
+    CategoryKind.CONSUMPTION -> "Consuming"
+    CategoryKind.UTILITY -> "Utility"
+    CategoryKind.NEUTRAL -> "Neutral"
+}
+
 fun categoryColor(kind: CategoryKind?, data: DataColors): Color = when (kind) {
     CategoryKind.PRODUCTION -> data.production
     CategoryKind.CONSUMPTION -> data.consumption
